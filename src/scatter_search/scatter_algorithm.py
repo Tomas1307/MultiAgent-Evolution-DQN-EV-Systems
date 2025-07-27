@@ -564,8 +564,8 @@ class ScatterSearchOptimizer:
         env = EVChargingEnv(system_config)
         env.update_reward_weights(reward_weights)
         
-        state_size = 40 
-        action_size = 60  
+        state_size = env.state_size
+        action_size = env.action_size
         
         agent = EnhancedDQNAgentPyTorch(state_size, action_size, **dqn_params)
         

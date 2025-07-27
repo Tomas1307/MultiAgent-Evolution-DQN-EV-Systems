@@ -85,15 +85,18 @@ def train_agent(systems, config):
     agent = EnhancedDQNAgent(
         state_size=state_size, 
         action_size=action_size,
-        learning_rate=config.get("learning_rate", 0.001),
+        learning_rate=config.get("learning_rate", 0.0005),
         gamma=config.get("gamma", 0.95),
         epsilon=config.get("epsilon", 0.9),
         epsilon_min=config.get("epsilon_min", 0.05),
         epsilon_decay=config.get("epsilon_decay", 0.995),
-        memory_size=config.get("memory_size", 5000),
+        memory_size=config.get("memory_size", 10000),
         batch_size=batch_size,
         dueling_network=config.get("dueling_network", True),
-        target_update_freq=config.get("target_update_freq", 30)
+        target_update_freq=config.get("target_update_freq", 50),
+        use_per=config.get("use_per", True),
+        use_noisy=config.get("use_noisy", False),
+        n_step=config.get("n_step", 3)
     )
     print(f"Agente creado exitosamente")
     
@@ -249,7 +252,9 @@ def train_agent(systems, config):
                         assign_count += 1
                         
                     next_state, reward, done = env.step(action)
-                    agent.remember(state, action, reward, next_state, done, system_type=system_num)
+                    info = {'action_type': selected_action.get('action', 'unknown')}
+
+                    agent.remember(state, action, reward, next_state, done, info=info)
                     
                     state = next_state
                     total_reward += reward
@@ -461,8 +466,10 @@ def train_dqn_agent(agent: EnhancedDQNAgent, env: EVChargingEnv, num_episodes: i
                 assign_count += 1
                 
             next_state, reward, done = env.step(action)
-            agent.remember(state, action, reward, next_state, done)
-            
+            info = {'action_type': selected_action.get('action', 'unknown')}
+
+            agent.remember(state, action, reward, next_state, done, info=info)
+    
             # Entrenar periódicamente
             if len(agent.memory) > agent.batch_size and decisions_made % 10 == 0:
                 agent.replay()

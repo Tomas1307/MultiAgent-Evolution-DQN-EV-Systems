@@ -10,84 +10,123 @@ import os
 
 class DQNNetwork(nn.Module):
     """
-    Red neuronal DQN con arquitectura Dueling implementada en PyTorch.
+    Red neuronal DQN mejorada con arquitectura más profunda y features adicionales.
+    Optimizada para el nuevo environment con gestión completa del parqueadero.
     """
-    def __init__(self, state_size, action_size, dueling=True):
+    def __init__(self, state_size, action_size, dueling=True, use_noisy=False):
         super(DQNNetwork, self).__init__()
         self.state_size = state_size
         self.action_size = action_size
         self.dueling = dueling
+        self.use_noisy = use_noisy
         
-        # Capas compartidas
-        self.fc1 = nn.Linear(state_size, 64)
-        self.bn1 = nn.BatchNorm1d(64)
-        self.fc2 = nn.Linear(64, 64)
-        self.dropout = nn.Dropout(0.2)
-        self.fc3 = nn.Linear(64, 32)
+        # Arquitectura más profunda para manejar la complejidad adicional
+        # Primera capa con más neuronas para capturar las nuevas features
+        self.fc1 = nn.Linear(state_size, 128)
+        self.bn1 = nn.BatchNorm1d(128)
+        
+        # Capas intermedias
+        self.fc2 = nn.Linear(128, 128)
+        self.bn2 = nn.BatchNorm1d(128)
+        self.dropout1 = nn.Dropout(0.2)
+        
+        self.fc3 = nn.Linear(128, 64)
+        self.bn3 = nn.BatchNorm1d(64)
+        self.dropout2 = nn.Dropout(0.15)
+        
+        # Skip connection para mejor flujo de gradientes
+        self.skip_connection = nn.Linear(state_size, 64)
         
         if self.dueling:
             # Dueling DQN: separar value y advantage streams
-            self.value_stream = nn.Linear(32, 16)
-            self.value_output = nn.Linear(16, 1)
+            # Value stream
+            self.value_stream = nn.Linear(64, 32)
+            self.value_output = nn.Linear(32, 1)
             
-            self.advantage_stream = nn.Linear(32, 16)
-            self.advantage_output = nn.Linear(16, action_size)
+            # Advantage stream (más grande para manejar más acciones)
+            self.advantage_stream = nn.Linear(64, 32)
+            self.advantage_output = nn.Linear(32, action_size)
         else:
             # DQN simple
-            self.output = nn.Linear(32, action_size)
+            self.output = nn.Linear(64, action_size)
+        
+        # Noisy layers para mejor exploración (opcional)
+        if self.use_noisy:
+            self.register_buffer('noise_scale', torch.tensor(0.1))
     
     def forward(self, x):
         # Asegurar que x tenga la forma correcta
         if len(x.shape) == 1:
             x = x.unsqueeze(0)
         
-        # Capas compartidas
-        x = F.relu(self.bn1(self.fc1(x)))
-        x = F.relu(self.fc2(x))
-        x = self.dropout(x)
-        x = F.relu(self.fc3(x))
+        # Forward pass con skip connection
+        # Capa 1
+        h1 = F.relu(self.bn1(self.fc1(x)))
+        
+        # Capa 2
+        h2 = F.relu(self.bn2(self.fc2(h1)))
+        h2 = self.dropout1(h2)
+        
+        # Capa 3
+        h3 = F.relu(self.bn3(self.fc3(h2)))
+        h3 = self.dropout2(h3)
+        
+        # Skip connection
+        skip = self.skip_connection(x)
+        h3 = h3 + skip  # Residual connection
         
         if self.dueling:
             # Dueling DQN
-            value = F.relu(self.value_stream(x))
+            value = F.relu(self.value_stream(h3))
             value = self.value_output(value)
             
-            advantage = F.relu(self.advantage_stream(x))
+            advantage = F.relu(self.advantage_stream(h3))
             advantage = self.advantage_output(advantage)
             
             # Combinar value y advantage
             # Q(s,a) = V(s) + (A(s,a) - mean(A(s,a)))
             q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
             
+            # Agregar ruido si está habilitado
+            if self.use_noisy and self.training:
+                noise = torch.randn_like(q_values) * self.noise_scale
+                q_values = q_values + noise
+            
             return q_values
         else:
             # DQN simple
-            return self.output(x)
+            return self.output(h3)
 
 class EnhancedDQNAgentPyTorch:
     """
-    Agente DQN mejorado implementado en PyTorch con soporte automático para GPU.
+    Agente DQN mejorado para el nuevo environment con gestión completa del parqueadero.
+    Incluye mejoras como Prioritized Experience Replay y n-step returns.
     """
     def __init__(self, state_size, action_size, learning_rate=0.0005, 
-                 gamma=0.95, epsilon=0.9, epsilon_min=0.05, epsilon_decay=0.99,
-                 memory_size=5000, batch_size=32, target_update_freq=50,
-                 dueling_network=True):
+                 gamma=0.95, epsilon=0.9, epsilon_min=0.05, epsilon_decay=0.995,
+                 memory_size=10000, batch_size=64, target_update_freq=50,
+                 dueling_network=True, use_per=True, use_noisy=False,
+                 n_step=3, alpha=0.6, beta=0.4):
         
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=memory_size)
-        self.batch_size = batch_size
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
         self.learning_rate = learning_rate
+        self.batch_size = batch_size
         self.dueling_network = dueling_network
+        self.use_per = use_per
+        self.use_noisy = use_noisy
         self.target_update_freq = target_update_freq
+        self.n_step = n_step
+        
+        # Contadores
         self.target_update_counter = 0
         self.steps = 0
         
-        # Detectar dispositivo (GPU/CPU)
+        # Detectar dispositivo
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"DQN Agent usando: {self.device}")
         
@@ -95,80 +134,150 @@ class EnhancedDQNAgentPyTorch:
             print(f"GPU detectada: {torch.cuda.get_device_name(0)}")
             print(f"Memoria GPU disponible: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
         
-        # Crear redes neuronales
-        self.q_network = DQNNetwork(state_size, action_size, dueling_network).to(self.device)
-        self.target_network = DQNNetwork(state_size, action_size, dueling_network).to(self.device)
+        # Crear redes neuronales mejoradas
+        self.q_network = DQNNetwork(state_size, action_size, dueling_network, use_noisy).to(self.device)
+        self.target_network = DQNNetwork(state_size, action_size, dueling_network, use_noisy).to(self.device)
         
-        # Optimizer
-        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
+        # Optimizer con configuración optimizada
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate, eps=1e-4)
+        
+        # Learning rate scheduler
+        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=1000, gamma=0.95)
         
         # Inicializar target network
         self.update_target_network()
         
-        # Memoria específica por sistema
-        self.system_memories = defaultdict(lambda: deque(maxlen=2000))
+        # Memory - usar Prioritized Experience Replay si está habilitado
+        if self.use_per:
+            self.memory = PrioritizedReplayBuffer(memory_size, alpha=alpha, beta=beta)
+        else:
+            self.memory = deque(maxlen=memory_size)
+        
+        # Buffer para n-step returns
+        self.n_step_buffer = deque(maxlen=n_step)
+        
+        # Memoria específica por tipo de acción para balance
+        self.action_type_memories = defaultdict(lambda: deque(maxlen=2000))
+        
+        # Estadísticas para monitoreo
+        self.action_counts = defaultdict(int)
+        self.reward_history = deque(maxlen=100)
         
         print(f"Red neuronal creada con {sum(p.numel() for p in self.q_network.parameters())} parámetros")
+        print(f"Configuración: Dueling={dueling_network}, PER={use_per}, Noisy={use_noisy}, N-step={n_step}")
     
     def update_target_network(self):
-        """Actualiza el target network copiando pesos del main network."""
-        self.target_network.load_state_dict(self.q_network.state_dict())
+        """Actualiza el target network con soft update."""
+        # Soft update con tau=1.0 (hard update)
+        tau = 1.0
+        for target_param, param in zip(self.target_network.parameters(), self.q_network.parameters()):
+            target_param.data.copy_(tau * param.data + (1.0 - tau) * target_param.data)
     
-    def remember(self, state, action, reward, next_state, done, system_type=0):
-        """Almacena experiencia en memoria."""
-        try:
-            action = int(action)
-            reward = float(reward)
-            done = bool(done)
-            system_type = int(system_type)
-        except (TypeError, ValueError):
-            return
+    def remember(self, state, action, reward, next_state, done, info=None):
+        """
+        Almacena experiencia con soporte para n-step returns y priorización.
+        info puede contener metadatos como tipo de acción.
+        """
+        # Registrar estadísticas
+        self.reward_history.append(reward)
+        if info and 'action_type' in info:
+            self.action_counts[info['action_type']] += 1
+        
+        # Agregar a n-step buffer
+        self.n_step_buffer.append((state, action, reward, next_state, done))
+        
+        # Si el buffer está lleno o episodio terminó, calcular n-step return
+        if len(self.n_step_buffer) == self.n_step or done:
+            # Calcular n-step return
+            n_step_return = 0
+            for i in range(len(self.n_step_buffer)):
+                n_step_return += (self.gamma ** i) * self.n_step_buffer[i][2]
             
-        if not (0 <= action < self.action_size):
-            return
+            # Usar el primer estado y último next_state
+            first_state = self.n_step_buffer[0][0]
+            first_action = self.n_step_buffer[0][1]
+            last_next_state = self.n_step_buffer[-1][3]
+            last_done = self.n_step_buffer[-1][4]
             
-        experience = (state, action, reward, next_state, done)
-        self.memory.append(experience)
-        self.system_memories[system_type].append(experience)
+            # Crear experiencia n-step
+            experience = (first_state, first_action, n_step_return, last_next_state, last_done)
+            
+            # Almacenar en memoria principal
+            if self.use_per:
+                # Calcular prioridad inicial (TD error se calculará después)
+                self.memory.add(experience, priority=abs(n_step_return) + 1e-6)
+            else:
+                self.memory.append(experience)
+            
+            # Almacenar también por tipo de acción si hay info
+            if info and 'action_type' in info:
+                self.action_type_memories[info['action_type']].append(experience)
+            
+            # Si terminó el episodio, limpiar buffer
+            if done:
+                self.n_step_buffer.clear()
     
     def act(self, state, possible_actions, verbose=False):
-        """Selecciona acción usando epsilon-greedy."""
+        """
+        Selecciona acción con epsilon-greedy mejorado y consideración del tipo de acción.
+        """
         if len(possible_actions) == 0:
             if verbose:
                 print("      No hay acciones posibles")
             return -1
         
+        # Epsilon-greedy con decay adaptativo
         if np.random.rand() <= self.epsilon:
-            action = np.random.choice(len(possible_actions))
+            # Exploración inteligente: preferir acciones menos exploradas
+            action_types = [self._get_action_type(action) for action in possible_actions]
+            action_counts = [self.action_counts[atype] + 1 for atype in action_types]
+            
+            # Probabilidades inversas a las veces que se ha usado cada tipo
+            probs = 1.0 / np.array(action_counts)
+            probs = probs / probs.sum()
+            
+            action = np.random.choice(len(possible_actions), p=probs)
+            
             if verbose:
-                print(f"      Acción aleatoria: {action} (epsilon: {self.epsilon:.3f})")
+                print(f"      Acción exploratoria: {action} (tipo: {action_types[action]}, "
+                      f"epsilon: {self.epsilon:.3f})")
             return action
         
         try:
+            # Preparar estado
             state_vector = self._process_state(state)
+            state_tensor = torch.FloatTensor(state_vector).unsqueeze(0).to(self.device)
             
-            # Convertir a tensor y mover a dispositivo
-            state_tensor = torch.FloatTensor(state_vector).to(self.device)
-            
-            # Modo evaluación para predicción
+            # Modo evaluación
             self.q_network.eval()
             with torch.no_grad():
                 q_values = self.q_network(state_tensor)
             
-            # Filtrar solo acciones posibles
+            # Obtener Q-values para acciones posibles
             q_values_np = q_values.cpu().numpy().flatten()
-            filtered_actions = [(i, q_values_np[i]) for i in range(min(len(q_values_np), len(possible_actions)))]
             
-            if not filtered_actions:
+            # Filtrar solo acciones posibles y agregar bonus por diversidad
+            action_values = []
+            for i, action in enumerate(possible_actions[:len(q_values_np)]):
+                if i < len(q_values_np):
+                    q_val = q_values_np[i]
+                    
+                    # Bonus por explorar tipos de acción menos usados
+                    action_type = self._get_action_type(action)
+                    exploration_bonus = 1.0 / (self.action_counts[action_type] + 10)
+                    
+                    action_values.append((i, q_val + exploration_bonus * 0.1))
+            
+            if not action_values:
                 action = np.random.choice(len(possible_actions))
-                if verbose:
-                    print(f"      Fallback aleatorio: {action}")
-                return action
+            else:
+                action = max(action_values, key=lambda x: x[1])[0]
             
-            action = max(filtered_actions, key=lambda x: x[1])[0]
             if verbose:
-                q_value = filtered_actions[action][1]
-                print(f"      Acción DQN: {action} (Q-value: {q_value:.3f})")
+                action_type = self._get_action_type(possible_actions[action])
+                q_value = action_values[action][1] if action < len(action_values) else 0
+                print(f"      Acción DQN: {action} (tipo: {action_type}, Q-value: {q_value:.3f})")
+            
             return action
             
         except Exception as e:
@@ -176,216 +285,258 @@ class EnhancedDQNAgentPyTorch:
                 print(f"      Error en act(): {e}")
             return np.random.choice(len(possible_actions))
     
-    def _safe_scalar_from_list(self, value, default=0.0):
-        """Convierte valor a escalar de manera segura."""
-        if value is None:
-            return default
-        
-        if isinstance(value, (list, np.ndarray)):
-            if len(value) == 0:
-                return default
-            try:
-                arr = np.array(value)
-                if arr.size == 0:
-                    return default
-                return float(np.mean(arr))
-            except (TypeError, ValueError):
-                return default
-        
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
+    def _get_action_type(self, action):
+        """Extrae el tipo de acción del diccionario de acción."""
+        if isinstance(action, dict) and 'action' in action:
+            return action['action']
+        return 'unknown'
     
     def _process_state(self, state):
-        """Procesa el estado para la red neuronal."""
+        """
+        Procesa el estado del nuevo environment con todas las features adicionales.
+        """
         if state is None:
             return np.zeros(self.state_size, dtype=np.float32)
         
-        base_vector = []
+        features = []
         
         try:
-            # Características del vehículo
+            # 1. Features del EV (mantener compatibilidad)
             ev_features = state.get("ev_features", [])
-            if isinstance(ev_features, list) and len(ev_features) > 0:
-                for i in range(7):
-                    if i < len(ev_features):
-                        val = self._safe_scalar_from_list(ev_features[i])
-                        base_vector.append(val)
-                    else:
-                        base_vector.append(0.0)
+            if isinstance(ev_features, list):
+                # Asegurar longitud consistente (padding si necesario)
+                ev_features_padded = ev_features[:15] + [0.0] * max(0, 15 - len(ev_features))
+                features.extend(ev_features_padded)
             else:
-                base_vector.extend([0.0] * 7)
+                features.extend([0.0] * 15)
             
-            # Características del sistema
-            system_features = [
-                self._safe_scalar_from_list(state.get("avg_available_spots", 0.5)),
-                self._safe_scalar_from_list(state.get("avg_available_chargers", 0.5)),
-                self._safe_scalar_from_list(state.get("min_price", 0.5)),
-                self._safe_scalar_from_list(state.get("avg_price", 0.5)),
-                self._safe_scalar_from_list(state.get("min_transformer_capacity", 0.5)),
-                self._safe_scalar_from_list(state.get("avg_transformer_capacity", 0.5)),
-                self._safe_scalar_from_list(state.get("system_type", 0)) / 20.0,
-                self._safe_scalar_from_list(state.get("n_spots_total", 10)) / 100.0,
-                self._safe_scalar_from_list(state.get("n_chargers_total", 5)) / 50.0,
-                self._safe_scalar_from_list(state.get("transformer_limit", 50)) / 200.0,
-                self._safe_scalar_from_list(state.get("max_charger_power", 10)) / 100.0
-            ]
-            base_vector.extend(system_features)
+            # 2. Features del parqueadero (NUEVO)
+            parking_features = state.get("parking_features", {})
+            if isinstance(parking_features, dict):
+                features.extend([
+                    parking_features.get("total_occupancy_ratio", 0.0),
+                    parking_features.get("charger_occupancy_ratio", 0.0),
+                    parking_features.get("charger_availability_ratio", 0.0),
+                    parking_features.get("waiting_spots_availability_ratio", 0.0),
+                    parking_features.get("total_available_spots", 0) / 100.0,
+                    parking_features.get("evs_charging", 0) / 50.0,
+                    parking_features.get("evs_waiting_inside", 0) / 50.0,
+                    parking_features.get("evs_outside", 0) / 50.0,
+                    parking_features.get("transformer_usage_ratio", 0.0)
+                ])
+            else:
+                features.extend([0.0] * 9)
             
-            # Características adicionales
-            additional_features = [
-                "battery_capacity", "charging_urgency", "system_demand_ratio", 
-                "time_remaining", "min_charge_rate", "max_charge_rate", 
-                "priority", "willingness_to_pay", "efficiency", "compatible_chargers_ratio"
-            ]
+            # 3. Features de cola y fairness (NUEVO)
+            queue_features = state.get("queue_features", {})
+            if isinstance(queue_features, dict):
+                features.extend([
+                    queue_features.get("queue_length", 0.0),
+                    queue_features.get("position_in_queue", -1.0),
+                    queue_features.get("avg_wait_time", 0.0),
+                    queue_features.get("fairness_score", 1.0)
+                ])
+            else:
+                features.extend([0.0, -1.0, 0.0, 1.0])
             
-            for feature in additional_features:
-                if feature in state:
-                    if feature == "battery_capacity":
-                        base_vector.append(self._safe_scalar_from_list(state[feature]) / 100.0)
-                    elif feature in ["min_charge_rate", "ac_charge_rate"]:
-                        base_vector.append(self._safe_scalar_from_list(state[feature]) / 50.0)
-                    elif feature in ["max_charge_rate", "dc_charge_rate"]:
-                        base_vector.append(self._safe_scalar_from_list(state[feature]) / 350.0)
-                    elif feature == "priority":
-                        base_vector.append(self._safe_scalar_from_list(state[feature]) / 3.0)
-                    elif feature == "willingness_to_pay":
-                        base_vector.append(self._safe_scalar_from_list(state[feature]) / 1.5)
-                    else:
-                        base_vector.append(self._safe_scalar_from_list(state[feature]))
+            # 4. Features agregadas del sistema (compatibilidad mejorada)
+            features.extend([
+                state.get("total_occupancy_ratio", 0.0),
+                state.get("charger_availability_ratio", 0.5),
+                state.get("waiting_spots_availability_ratio", 0.5),
+                state.get("queue_length", 0.0),
+                state.get("ev_position_in_queue", -1.0),
+                state.get("avg_wait_time_current", 0.0)
+            ])
             
-            # Características de listas
-            list_features = ["spot_availability", "charger_availability", "relevant_prices", "transformer_capacity"]
-            for feature in list_features:
-                if feature in state:
-                    base_vector.append(self._safe_scalar_from_list(state[feature]))
+            # 5. Información del sistema
+            features.extend([
+                state.get("system_type", 0) / 20.0,
+                state.get("n_spots_total", 100) / 200.0,
+                state.get("n_chargers_total", 10) / 50.0,
+                state.get("transformer_limit", 50) / 200.0
+            ])
             
-            # Asegurar que todos son escalares
-            base_vector = [self._safe_scalar_from_list(x) for x in base_vector]
+            # 6. Información temporal
+            features.extend([
+                state.get("current_time_idx", 0) / 100.0,
+                state.get("current_time_normalized", 0.0)
+            ])
+            
+            # 7. Estado actual del EV (NUEVO - one-hot encoding)
+            ev_status = state.get("ev_current_status", "outside")
+            status_encoding = {
+                "outside": [1, 0, 0, 0],
+                "waiting_inside": [0, 1, 0, 0],
+                "charging": [0, 0, 1, 0],
+                "charged_waiting": [0, 0, 0, 1]
+            }
+            features.extend(status_encoding.get(ev_status, [0, 0, 0, 0]))
             
             # Convertir a numpy array
-            all_features = np.array(base_vector, dtype=np.float32)
+            features_array = np.array(features, dtype=np.float32)
             
             # Asegurar dimensión correcta
-            if len(all_features) < self.state_size:
-                padding = np.zeros(self.state_size - len(all_features), dtype=np.float32)
-                all_features = np.concatenate([all_features, padding])
-            elif len(all_features) > self.state_size:
-                all_features = all_features[:self.state_size]
+            if len(features_array) < self.state_size:
+                padding = np.zeros(self.state_size - len(features_array), dtype=np.float32)
+                features_array = np.concatenate([features_array, padding])
+            elif len(features_array) > self.state_size:
+                features_array = features_array[:self.state_size]
             
             # Limpiar NaN e infinitos
-            all_features = np.nan_to_num(all_features, nan=0.0, posinf=1.0, neginf=0.0)
+            features_array = np.nan_to_num(features_array, nan=0.0, posinf=1.0, neginf=0.0)
             
-            return all_features
+            return features_array
             
         except Exception as e:
             print(f"Error en _process_state: {e}")
             return np.zeros(self.state_size, dtype=np.float32)
     
-    def replay(self, system_specific=False, system_type=0):
-        """Entrena la red con experiencia pasada."""
-        try:
-            # Seleccionar memoria
-            if system_specific and len(self.system_memories[system_type]) >= self.batch_size:
-                samples = random.sample(self.system_memories[system_type], self.batch_size)
-            else:
-                if len(self.memory) < self.batch_size:
-                    return
-                samples = random.sample(self.memory, self.batch_size)
-            
-            if not samples:
+    def replay(self, beta=None):
+        """
+        Entrena la red con experiencia pasada usando las mejoras implementadas.
+        """
+        if self.use_per:
+            if len(self.memory) < self.batch_size:
                 return
             
-            # Procesar batch
-            states = []
-            actions = []
-            rewards = []
-            next_states = []
-            dones = []
-            
-            for state, action, reward, next_state, done in samples:
-                if not isinstance(action, (int, np.integer)) or action >= self.action_size:
-                    continue
-                
-                try:
-                    state_vector = self._process_state(state)
-                    next_state_vector = self._process_state(next_state)
-                    
-                    if state_vector is None or next_state_vector is None:
-                        continue
-                    
-                    states.append(state_vector)
-                    actions.append(action)
-                    rewards.append(float(reward))
-                    next_states.append(next_state_vector)
-                    dones.append(done)
-                    
-                except Exception as e:
-                    continue
-            
-            if len(states) == 0:
+            # Obtener batch con prioridades
+            batch, indices, weights = self.memory.sample(self.batch_size, beta or 0.4)
+            weights = torch.FloatTensor(weights).to(self.device)
+        else:
+            if len(self.memory) < self.batch_size:
                 return
             
-            # Convertir a tensores
-            states_tensor = torch.FloatTensor(np.array(states)).to(self.device)
-            actions_tensor = torch.LongTensor(actions).to(self.device)
-            rewards_tensor = torch.FloatTensor(rewards).to(self.device)
-            next_states_tensor = torch.FloatTensor(np.array(next_states)).to(self.device)
-            dones_tensor = torch.BoolTensor(dones).to(self.device)
+            # Sampling balanceado: 70% uniforme, 30% de acciones específicas
+            uniform_size = int(self.batch_size * 0.7)
+            balanced_size = self.batch_size - uniform_size
             
-            # Calcular Q-values actuales
-            self.q_network.train()
-            current_q_values = self.q_network(states_tensor)
-            current_q_values = current_q_values.gather(1, actions_tensor.unsqueeze(1))
+            # Sample uniforme
+            batch = random.sample(self.memory, uniform_size)
             
-            # Calcular Q-values target (Double DQN)
-            with torch.no_grad():
-                # Usar main network para seleccionar acciones
-                next_q_values_main = self.q_network(next_states_tensor)
-                next_actions = next_q_values_main.argmax(1)
-                
-                # Usar target network para evaluar
-                next_q_values_target = self.target_network(next_states_tensor)
-                next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1))
-                
-                # Calcular targets
-                target_q_values = rewards_tensor + (self.gamma * next_q_values.squeeze() * ~dones_tensor)
+            # Sample balanceado por tipo de acción
+            action_types = list(self.action_type_memories.keys())
+            if action_types and balanced_size > 0:
+                samples_per_type = balanced_size // len(action_types)
+                for action_type in action_types:
+                    if len(self.action_type_memories[action_type]) > 0:
+                        type_samples = random.sample(
+                            self.action_type_memories[action_type],
+                            min(samples_per_type, len(self.action_type_memories[action_type]))
+                        )
+                        batch.extend(type_samples)
             
-            # Calcular loss y optimizar
-            loss = F.mse_loss(current_q_values.squeeze(), target_q_values)
+            # Pesos uniformes si no usamos PER
+            weights = torch.ones(len(batch)).to(self.device)
+            indices = None
+        
+        # Procesar batch
+        states = []
+        actions = []
+        rewards = []
+        next_states = []
+        dones = []
+        
+        for state, action, reward, next_state, done in batch:
+            state_vector = self._process_state(state)
+            next_state_vector = self._process_state(next_state)
             
-            self.optimizer.zero_grad()
-            loss.backward()
+            states.append(state_vector)
+            actions.append(action)
+            rewards.append(float(reward))
+            next_states.append(next_state_vector)
+            dones.append(done)
+        
+        # Convertir a tensores
+        states_tensor = torch.FloatTensor(np.array(states)).to(self.device)
+        actions_tensor = torch.LongTensor(actions).to(self.device)
+        rewards_tensor = torch.FloatTensor(rewards).to(self.device)
+        next_states_tensor = torch.FloatTensor(np.array(next_states)).to(self.device)
+        dones_tensor = torch.BoolTensor(dones).to(self.device)
+        
+        # Calcular Q-values actuales
+        self.q_network.train()
+        current_q_values = self.q_network(states_tensor)
+        current_q_values = current_q_values.gather(1, actions_tensor.unsqueeze(1))
+        
+        # Calcular Q-values target (Double DQN)
+        with torch.no_grad():
+            # Seleccionar acciones con main network
+            next_q_values_main = self.q_network(next_states_tensor)
+            next_actions = next_q_values_main.argmax(1)
             
-            # Gradient clipping para estabilidad
-            torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
+            # Evaluar con target network
+            next_q_values_target = self.target_network(next_states_tensor)
+            next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1))
             
-            self.optimizer.step()
-            
-            # Decrementar epsilon
-            if self.epsilon > self.epsilon_min:
-                self.epsilon *= self.epsilon_decay
-            
-            # Actualizar target network
-            self.steps += 1
-            self.target_update_counter += 1
-            if self.target_update_counter >= self.target_update_freq:
-                self.update_target_network()
-                self.target_update_counter = 0
-                
-        except Exception as e:
-            print(f"Error en replay: {e}")
+            # Calcular targets con n-step return
+            n_step_discount = self.gamma ** self.n_step
+            target_q_values = rewards_tensor + (n_step_discount * next_q_values.squeeze() * ~dones_tensor)
+        
+        # Calcular TD errors para PER
+        td_errors = torch.abs(current_q_values.squeeze() - target_q_values).detach()
+        
+        # Calcular loss con importance sampling weights
+        loss = F.smooth_l1_loss(current_q_values.squeeze(), target_q_values, reduction='none')
+        loss = (loss * weights).mean()
+        
+        # Optimizar
+        self.optimizer.zero_grad()
+        loss.backward()
+        
+        # Gradient clipping más agresivo para estabilidad
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=0.5)
+        
+        self.optimizer.step()
+        self.scheduler.step()
+        
+        # Actualizar prioridades en PER
+        if self.use_per and indices is not None:
+            priorities = td_errors.cpu().numpy() + 1e-6
+            self.memory.update_priorities(indices, priorities)
+        
+        # Decrementar epsilon
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+        
+        # Actualizar target network
+        self.steps += 1
+        self.target_update_counter += 1
+        if self.target_update_counter >= self.target_update_freq:
+            self.update_target_network()
+            self.target_update_counter = 0
+    
+    def get_statistics(self):
+        """Retorna estadísticas del agente para monitoreo."""
+        stats = {
+            "epsilon": self.epsilon,
+            "steps": self.steps,
+            "memory_size": len(self.memory) if not self.use_per else len(self.memory),
+            "action_distribution": dict(self.action_counts),
+            "avg_reward_last_100": np.mean(self.reward_history) if self.reward_history else 0,
+            "learning_rate": self.scheduler.get_last_lr()[0]
+        }
+        return stats
     
     def save(self, filepath):
-        """Guarda el modelo."""
+        """Guarda el modelo y estadísticas."""
         try:
             torch.save({
                 'q_network_state_dict': self.q_network.state_dict(),
                 'target_network_state_dict': self.target_network.state_dict(),
                 'optimizer_state_dict': self.optimizer.state_dict(),
+                'scheduler_state_dict': self.scheduler.state_dict(),
                 'epsilon': self.epsilon,
-                'steps': self.steps
+                'steps': self.steps,
+                'action_counts': dict(self.action_counts),
+                'config': {
+                    'state_size': self.state_size,
+                    'action_size': self.action_size,
+                    'dueling': self.dueling_network,
+                    'use_per': self.use_per,
+                    'use_noisy': self.use_noisy,
+                    'n_step': self.n_step
+                }
             }, filepath)
             return True
         except Exception as e:
@@ -393,20 +544,89 @@ class EnhancedDQNAgentPyTorch:
             return False
     
     def load(self, filepath):
-        """Carga el modelo."""
+        """Carga el modelo y estadísticas."""
         try:
             if not os.path.exists(filepath):
                 return False
-                
+            
             checkpoint = torch.load(filepath, map_location=self.device)
             
             self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
             self.target_network.load_state_dict(checkpoint['target_network_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            
+            if 'scheduler_state_dict' in checkpoint:
+                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            
             self.epsilon = checkpoint.get('epsilon', self.epsilon)
             self.steps = checkpoint.get('steps', 0)
+            
+            if 'action_counts' in checkpoint:
+                self.action_counts = defaultdict(int, checkpoint['action_counts'])
             
             return True
         except Exception as e:
             print(f"Error al cargar modelo: {e}")
             return False
+
+
+class PrioritizedReplayBuffer:
+    """
+    Buffer de replay con priorización para importance sampling.
+    """
+    def __init__(self, capacity, alpha=0.6, beta=0.4):
+        self.capacity = capacity
+        self.alpha = alpha
+        self.beta = beta
+        self.buffer = []
+        self.priorities = np.zeros(capacity, dtype=np.float32)
+        self.position = 0
+        self.max_priority = 1.0
+    
+    def add(self, experience, priority=None):
+        """Agrega experiencia con prioridad."""
+        if priority is None:
+            priority = self.max_priority
+        
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(experience)
+        else:
+            self.buffer[self.position] = experience
+        
+        self.priorities[self.position] = priority
+        self.position = (self.position + 1) % self.capacity
+        
+        self.max_priority = max(self.max_priority, priority)
+    
+    def sample(self, batch_size, beta=None):
+        """Samplea batch con importance sampling weights."""
+        if beta is None:
+            beta = self.beta
+        
+        size = len(self.buffer)
+        
+        # Calcular probabilidades
+        priorities = self.priorities[:size]
+        probs = priorities ** self.alpha
+        probs /= probs.sum()
+        
+        # Samplear índices
+        indices = np.random.choice(size, batch_size, p=probs)
+        
+        # Calcular importance sampling weights
+        weights = (size * probs[indices]) ** (-beta)
+        weights /= weights.max()
+        
+        # Obtener experiencias
+        batch = [self.buffer[idx] for idx in indices]
+        
+        return batch, indices, weights
+    
+    def update_priorities(self, indices, priorities):
+        """Actualiza prioridades después del entrenamiento."""
+        for idx, priority in zip(indices, priorities):
+            self.priorities[idx] = priority
+            self.max_priority = max(self.max_priority, priority)
+    
+    def __len__(self):
+        return len(self.buffer)
