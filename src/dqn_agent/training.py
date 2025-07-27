@@ -17,7 +17,8 @@ def create_episode_data(episode_num, total_reward, energy_metrics, assign_count,
     Crea un diccionario estructurado con los datos del episodio para el logger.
     Compatibilidad con el main anterior que funciona.
     """
-    satisfaction_pct = energy_metrics.get("total_satisfaction_pct", 0.0)
+    # CÓDIGO CORREGIDO
+    satisfaction_pct = energy_metrics.get("energy_satisfaction_pct", 0.0)
     assign_ratio = (assign_count / total_vehicles * 100) if total_vehicles > 0 else 0
 
     return {
@@ -246,7 +247,12 @@ def train_agent(systems, config):
                         break
                         
                     selected_action = possible_actions[action]
-                    if selected_action["skip"]:
+
+                    # Comprueba el VALOR de la clave 'action' para ver si es una acción de no-asignación.
+                    # Usamos .get() para más seguridad y comprobamos todas las acciones que no son una asignación directa.
+                    non_assignment_actions = ["skip", "reject", "strategic_reject", "continue_waiting"]
+
+                    if selected_action.get("action") in non_assignment_actions:
                         skip_count += 1
                     else:
                         assign_count += 1
@@ -268,7 +274,8 @@ def train_agent(systems, config):
                 print(f" Completado")
                 
                 # Métricas de satisfacción (usar el método correcto)
-                energy_metrics = env.get_energy_satisfaction_metrics()
+                energy_metrics = env.get_performance_metrics()
+
                 satisfaction_pct = energy_metrics["total_satisfaction_pct"]
                 
                 episode_time = time.time() - episode_start_time
@@ -460,7 +467,12 @@ def train_dqn_agent(agent: EnhancedDQNAgent, env: EVChargingEnv, num_episodes: i
                 break
                 
             selected_action = possible_actions[action]
-            if selected_action["skip"]:
+
+            # Comprueba el VALOR de la clave 'action' para ver si es una acción de no-asignación.
+            # Usamos .get() para más seguridad y comprobamos todas las acciones que no son una asignación directa.
+            non_assignment_actions = ["skip", "reject", "strategic_reject", "continue_waiting"]
+
+            if selected_action.get("action") in non_assignment_actions:
                 skip_count += 1
             else:
                 assign_count += 1
@@ -481,7 +493,8 @@ def train_dqn_agent(agent: EnhancedDQNAgent, env: EVChargingEnv, num_episodes: i
         episode_time = time.time() - start_time
 
         # Obtener métricas finales del episodio
-        metrics = env.get_energy_satisfaction_metrics()
+        metrics = env.get_performance_metrics()
+
         
         # Registrar el episodio usando el logger
         logger.log_episode(

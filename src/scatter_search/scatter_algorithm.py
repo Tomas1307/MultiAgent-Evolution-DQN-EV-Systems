@@ -14,6 +14,7 @@ from ..dqn_agent.training import train_dqn_agent
 from ..dqn_agent.agent import EnhancedDQNAgentPyTorch
 from ..dqn_agent.environment import EVChargingEnv
 import os
+import traceback
 class ScatterSearchOptimizer:
     """Implementación principal del algoritmo Scatter Search"""
     
@@ -536,6 +537,13 @@ class ScatterSearchOptimizer:
                     fitness = self._evaluate_single_config(dqn_params, reward_weights, system_config, episodes)
                     system_fitness.append(fitness)
                 except Exception as e:
+                    # --- INICIO DE LA MODIFICACIÓN ---
+                    print(f"\n!!!!!!!!!! ERROR DURANTE LA EVALUACIÓN !!!!!!!!!!")
+                    print(f"Error: {e}")
+                    traceback.print_exc() # <-- AÑADE ESTA LÍNEA PARA VER EL ERROR COMPLETO
+                    print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
+                    # --- FIN DE LA MODIFICACIÓN ---
+
                     if "missing" in str(e) or "Error" in str(e):
                         print(f"        Error en configuracion {i+1}: {str(e)[:50]}...")
                     system_fitness.append(-1000.0)
