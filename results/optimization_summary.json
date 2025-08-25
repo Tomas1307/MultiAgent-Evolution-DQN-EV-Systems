@@ -1,0 +1,42 @@
+{
+  "optimization_completed": true,
+  "execution_time_hours": 242.3116195385986,
+  "best_fitness": 851.868722929476,
+  "total_solutions_found": 5,
+  "archetypes_discovered": [
+    "cost_minimizer",
+    "efficiency_focused",
+    "balanced_optimizer"
+  ],
+  "top_3_solutions": [
+    {
+      "rank": 4,
+      "archetype": "balanced_optimizer",
+      "fitness": 851.868722929476,
+      "config_file": "balanced_optimizer_rank_4.yaml"
+    },
+    {
+      "rank": 1,
+      "archetype": "cost_minimizer",
+      "fitness": 837.5215125357139,
+      "config_file": "cost_minimizer_rank_1.yaml"
+    },
+    {
+      "rank": 5,
+      "archetype": "balanced_optimizer",
+      "fitness": 813.4673052624008,
+      "config_file": "balanced_optimizer_rank_5.yaml"
+    }
+  ],
+  "performance_improvement": {
+    "improvement_pct": 6.483590366184501,
+    "baseline_fitness": 800.0,
+    "best_fitness": 851.868722929476,
+    "absolute_improvement": 51.86872292947601
+  },
+  "recommendations": [
+    "Implementar configuraci\u00f3n 'balanced_optimizer' como soluci\u00f3n principal (Fitness: 851.87)",
+    "Se encontraron m\u00faltiples arquetipos viables. Considere implementar sistema adaptativo que seleccione arquetipo seg\u00fan contexto operativo.",
+    "Learning rate optimizado es agresivo (0.0070). Sugiere potencial para convergencia r\u00e1pida en este dominio."
+  ]
+}

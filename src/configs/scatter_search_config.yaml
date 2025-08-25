@@ -2,12 +2,12 @@
 
 algorithm:
   # Population parameters
-  population_size: 200
-  ref_set_size: 20
-  elite_count: 12
-  diverse_count: 8
-  max_iterations: 50
-  max_time_hours: 30
+  population_size: 2400
+  ref_set_size: 320
+  elite_count: 160
+  diverse_count: 160
+  max_iterations: 80
+  max_time_hours: 240
   
   # Operation probabilities
   combination_probability: 0.9
@@ -21,19 +21,19 @@ evaluation:
   # FAST EVALUATION - Initial aggressive filtering
   fast:
     systems: [1,2,3]  # System IDs for fast evaluation
-    episodes: 30
+    episodes: 50
     description: "Initial Filtering - RTX 4090"
     
   # MEDIUM EVALUATION - Promising candidates
   medium:
     systems: [1, 2, 3, 4, 5,6,7,8,9]
-    episodes: 60
+    episodes: 80
     description: "Medium evaluation for promising candidates"
     
   # Full evaluation: all available systems
   full:
     systems: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
-    episodes: 80
+    episodes: 100
     description: "Complete evaluation for best candidates"
 
 output:

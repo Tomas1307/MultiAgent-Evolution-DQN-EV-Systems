@@ -1,0 +1,386 @@
+{
+  "best_solutions": [
+    {
+      "rank": 4,
+      "fitness": 851.868722929476,
+      "archetype": "balanced_optimizer",
+      "hyperparameters": {
+        "learning_rate": 0.006983395271068879,
+        "gamma": 0.9931175548896791,
+        "epsilon_start": 0.40956499061549917,
+        "epsilon_min": 0.02928067908832202,
+        "epsilon_decay": 0.9917524591030679,
+        "batch_size": 64,
+        "target_update_freq": 20,
+        "memory_size": 10000,
+        "dueling_network": true,
+        "energy_satisfaction_weight": 3.3146151766200465,
+        "energy_cost_weight": 0.6473892678430038,
+        "penalty_skipped_vehicle": 108.8309486355453,
+        "reward_assigned_vehicle": 82.55124001935025
+      },
+      "configuration_name": "optimized_balanced_optimizer_4"
+    },
+    {
+      "rank": 1,
+      "fitness": 837.5215125357139,
+      "archetype": "cost_minimizer",
+      "hyperparameters": {
+        "learning_rate": 0.0060591152613648485,
+        "gamma": 0.9914918468110137,
+        "epsilon_start": 0.726213649740638,
+        "epsilon_min": 0.027085835534883567,
+        "epsilon_decay": 0.9929328471124252,
+        "batch_size": 32,
+        "target_update_freq": 10,
+        "memory_size": 200000,
+        "dueling_network": true,
+        "energy_satisfaction_weight": 1.079616644473497,
+        "energy_cost_weight": 0.9510004371385287,
+        "penalty_skipped_vehicle": 65.5265548041047,
+        "reward_assigned_vehicle": 86.01720170127757
+      },
+      "configuration_name": "optimized_cost_minimizer_1"
+    },
+    {
+      "rank": 5,
+      "fitness": 813.4673052624008,
+      "archetype": "balanced_optimizer",
+      "hyperparameters": {
+        "learning_rate": 0.007244061854995881,
+        "gamma": 0.9951473198365488,
+        "epsilon_start": 0.45743391928377186,
+        "epsilon_min": 0.04581655913108422,
+        "epsilon_decay": 0.9948617759121086,
+        "batch_size": 128,
+        "target_update_freq": 10,
+        "memory_size": 10000,
+        "dueling_network": true,
+        "energy_satisfaction_weight": 2.1350141034407213,
+        "energy_cost_weight": 0.7480770194984847,
+        "penalty_skipped_vehicle": 88.14551853585911,
+        "reward_assigned_vehicle": 27.29614051640955
+      },
+      "configuration_name": "optimized_balanced_optimizer_5"
+    },
+    {
+      "rank": 2,
+      "fitness": 810.2167758976747,
+      "archetype": "cost_minimizer",
+      "hyperparameters": {
+        "learning_rate": 0.006693402294154038,
+        "gamma": 0.9898835548110285,
+        "epsilon_start": 0.4947832928945562,
+        "epsilon_min": 0.029977618714593156,
+        "epsilon_decay": 0.9919534185075244,
+        "batch_size": 32,
+        "target_update_freq": 10,
+        "memory_size": 5000,
+        "dueling_network": true,
+        "energy_satisfaction_weight": 2.5041785770326084,
+        "energy_cost_weight": 0.9746803610178897,
+        "penalty_skipped_vehicle": 97.95621561877601,
+        "reward_assigned_vehicle": 125.08997593670924
+      },
+      "configuration_name": "optimized_cost_minimizer_2"
+    },
+    {
+      "rank": 3,
+      "fitness": 777.9198241394033,
+      "archetype": "efficiency_focused",
+      "hyperparameters": {
+        "learning_rate": 0.00746852741344339,
+        "gamma": 0.9932880712969072,
+        "epsilon_start": 0.36715364918165594,
+        "epsilon_min": 0.028789842256940635,
+        "epsilon_decay": 0.9915242581895463,
+        "batch_size": 128,
+        "target_update_freq": 10,
+        "memory_size": 100000,
+        "dueling_network": true,
+        "energy_satisfaction_weight": 2.407110108759443,
+        "energy_cost_weight": 0.6709495489488252,
+        "penalty_skipped_vehicle": 67.40293316493927,
+        "reward_assigned_vehicle": 100.31185283376672
+      },
+      "configuration_name": "optimized_efficiency_focused_3"
+    }
+  ],
+  "optimization_summary": {
+    "total_iterations": 38,
+    "total_time_hours": 242.31161953767142,
+    "final_best_fitness": 131.2215720301222,
+    "initial_best_fitness": 234.74770133465776,
+    "improvement": -103.52612930453557,
+    "final_diversity": 0.2556233458915801,
+    "iteration_history": [
+      {
+        "iteration": 1,
+        "time": 98639.82993221283,
+        "best_fitness": 234.74770133465776,
+        "iteration_duration": 80860.98375320435,
+        "diversity_score": 0.32929014313942684
+      },
+      {
+        "iteration": 2,
+        "time": 156178.25751972198,
+        "best_fitness": 154.62756568380775,
+        "iteration_duration": 57530.72267508507,
+        "diversity_score": 0.3068870517469031
+      },
+      {
+        "iteration": 3,
+        "time": 217261.64176249504,
+        "best_fitness": 176.16215737730204,
+        "iteration_duration": 61075.7094335556,
+        "diversity_score": 0.2911455056019898
+      },
+      {
+        "iteration": 4,
+        "time": 272335.0647649765,
+        "best_fitness": 208.71547392534802,
+        "iteration_duration": 55065.03958058357,
+        "diversity_score": 0.28287753557003914
+      },
+      {
+        "iteration": 5,
+        "time": 287311.9681675434,
+        "best_fitness": 28.60206185827218,
+        "iteration_duration": 14965.416513204575,
+        "diversity_score": 0.28184172075714764
+      },
+      {
+        "iteration": 6,
+        "time": 339003.8258919716,
+        "best_fitness": 133.76536041251933,
+        "iteration_duration": 51680.56806015968,
+        "diversity_score": 0.2749669211385275
+      },
+      {
+        "iteration": 7,
+        "time": 383261.0285060406,
+        "best_fitness": 212.67460625656335,
+        "iteration_duration": 44248.959321022034,
+        "diversity_score": 0.271925173397103
+      },
+      {
+        "iteration": 8,
+        "time": 397655.4727537632,
+        "best_fitness": 65.01617148947989,
+        "iteration_duration": 14382.468831777573,
+        "diversity_score": 0.27058839226655407
+      },
+      {
+        "iteration": 9,
+        "time": 432751.7647738457,
+        "best_fitness": 94.65523106539639,
+        "iteration_duration": 35085.19356012344,
+        "diversity_score": 0.2676571086162941
+      },
+      {
+        "iteration": 10,
+        "time": 462886.54827594757,
+        "best_fitness": 348.91377038880324,
+        "iteration_duration": 30124.198767900467,
+        "diversity_score": 0.2682952425582772
+      },
+      {
+        "iteration": 11,
+        "time": 474846.5394330025,
+        "best_fitness": 243.9716719770707,
+        "iteration_duration": 11948.441497087479,
+        "diversity_score": 0.2683058055917671
+      },
+      {
+        "iteration": 12,
+        "time": 486347.13253355026,
+        "best_fitness": 319.0672453848669,
+        "iteration_duration": 11490.572655200958,
+        "diversity_score": 0.2689977369040578
+      },
+      {
+        "iteration": 13,
+        "time": 512001.90367364883,
+        "best_fitness": 52.02252826658527,
+        "iteration_duration": 25645.67675590515,
+        "diversity_score": 0.26371185175350464
+      },
+      {
+        "iteration": 14,
+        "time": 534101.1081461906,
+        "best_fitness": 225.85540613009456,
+        "iteration_duration": 22088.72715806961,
+        "diversity_score": 0.26241878897716586
+      },
+      {
+        "iteration": 15,
+        "time": 555494.9970116615,
+        "best_fitness": 23.911853703461748,
+        "iteration_duration": 21386.582322597504,
+        "diversity_score": 0.2615516896686607
+      },
+      {
+        "iteration": 16,
+        "time": 578567.1228306293,
+        "best_fitness": 257.44018069551817,
+        "iteration_duration": 23062.585757017136,
+        "diversity_score": 0.261194853014882
+      },
+      {
+        "iteration": 17,
+        "time": 590011.6584935188,
+        "best_fitness": 30.039323887602905,
+        "iteration_duration": 11433.585260629654,
+        "diversity_score": 0.26027226870774434
+      },
+      {
+        "iteration": 18,
+        "time": 601369.2203228474,
+        "best_fitness": 255.78458347180907,
+        "iteration_duration": 11347.646703720093,
+        "diversity_score": 0.2590280900758962
+      },
+      {
+        "iteration": 19,
+        "time": 622247.1788418293,
+        "best_fitness": 148.57326666901525,
+        "iteration_duration": 20866.252457380295,
+        "diversity_score": 0.25900892986241597
+      },
+      {
+        "iteration": 20,
+        "time": 630733.5277678967,
+        "best_fitness": 104.71513677136105,
+        "iteration_duration": 8476.778092861176,
+        "diversity_score": 0.25998028114257044
+      },
+      {
+        "iteration": 21,
+        "time": 649380.4563584328,
+        "best_fitness": 144.42364377578394,
+        "iteration_duration": 18639.623751163483,
+        "diversity_score": 0.25914736955534656
+      },
+      {
+        "iteration": 22,
+        "time": 668992.8907051086,
+        "best_fitness": 147.31501881795052,
+        "iteration_duration": 19600.074455976486,
+        "diversity_score": 0.2581803181293336
+      },
+      {
+        "iteration": 23,
+        "time": 680444.4243760109,
+        "best_fitness": 99.34784449910258,
+        "iteration_duration": 11442.485503911972,
+        "diversity_score": 0.25961783558632423
+      },
+      {
+        "iteration": 24,
+        "time": 699074.0523459911,
+        "best_fitness": 195.56987694488313,
+        "iteration_duration": 18618.632348537445,
+        "diversity_score": 0.26152658894903325
+      },
+      {
+        "iteration": 25,
+        "time": 710578.8738808632,
+        "best_fitness": 193.74107086702756,
+        "iteration_duration": 11493.83719778061,
+        "diversity_score": 0.26210981580402504
+      },
+      {
+        "iteration": 26,
+        "time": 721548.4171252251,
+        "best_fitness": 152.78097777057894,
+        "iteration_duration": 10960.236187696457,
+        "diversity_score": 0.26144029617449704
+      },
+      {
+        "iteration": 27,
+        "time": 733384.1893970966,
+        "best_fitness": 57.51834299214251,
+        "iteration_duration": 11828.477100133896,
+        "diversity_score": 0.2574568009295948
+      },
+      {
+        "iteration": 28,
+        "time": 744743.136152029,
+        "best_fitness": 121.76912247123582,
+        "iteration_duration": 11351.763096809387,
+        "diversity_score": 0.25733804115908787
+      },
+      {
+        "iteration": 29,
+        "time": 756029.573302269,
+        "best_fitness": 163.3834028182966,
+        "iteration_duration": 11279.136559963226,
+        "diversity_score": 0.255638537774604
+      },
+      {
+        "iteration": 30,
+        "time": 763591.4966218472,
+        "best_fitness": 97.52229584709328,
+        "iteration_duration": 7554.756139755249,
+        "diversity_score": 0.25655597516753037
+      },
+      {
+        "iteration": 31,
+        "time": 774875.2172784805,
+        "best_fitness": 240.19626878023715,
+        "iteration_duration": 11276.46899342537,
+        "diversity_score": 0.25750345406224684
+      },
+      {
+        "iteration": 32,
+        "time": 786353.3489313126,
+        "best_fitness": 67.64671558132275,
+        "iteration_duration": 11468.01450920105,
+        "diversity_score": 0.256775732217269
+      },
+      {
+        "iteration": 33,
+        "time": 802523.151456356,
+        "best_fitness": 99.67542593415604,
+        "iteration_duration": 16160.201030731201,
+        "diversity_score": 0.25818427745340433
+      },
+      {
+        "iteration": 34,
+        "time": 818166.1273910999,
+        "best_fitness": 113.39230364626637,
+        "iteration_duration": 15632.862926244736,
+        "diversity_score": 0.25731797715923443
+      },
+      {
+        "iteration": 35,
+        "time": 829517.9815645218,
+        "best_fitness": 99.61461655607977,
+        "iteration_duration": 11342.386220216751,
+        "diversity_score": 0.25757441093917455
+      },
+      {
+        "iteration": 36,
+        "time": 844974.9071691036,
+        "best_fitness": 16.449565254849972,
+        "iteration_duration": 15446.119352817535,
+        "diversity_score": 0.2565029281725798
+      },
+      {
+        "iteration": 37,
+        "time": 860581.2596492767,
+        "best_fitness": 231.4412309618724,
+        "iteration_duration": 15595.806002616882,
+        "diversity_score": 0.2555060235482749
+      },
+      {
+        "iteration": 38,
+        "time": 871841.411062479,
+        "best_fitness": 131.2215720301222,
+        "iteration_duration": 11250.096114635468,
+        "diversity_score": 0.2556233458915801
+      }
+    ]
+  },
+  "execution_time": 872321.8303389549
+}

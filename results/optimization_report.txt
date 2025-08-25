@@ -1,0 +1,67 @@
+SCATTER SEARCH OPTIMIZATION REPORT
+==================================================
+
+Fecha: 2025-08-14 12:35:17
+Tiempo total: 242.31 horas
+
+MEJORES SOLUCIONES ENCONTRADAS:
+------------------------------
+
+1. BALANCED_OPTIMIZER
+   Fitness: 851.87
+   Configuración: optimized_balanced_optimizer_4
+   Learning Rate: 0.006983395271068879
+   Gamma: 0.9931175548896791
+   Satisfaction Weight: 3.3146151766200465
+   Cost Weight: 0.6473892678430038
+
+2. COST_MINIMIZER
+   Fitness: 837.52
+   Configuración: optimized_cost_minimizer_1
+   Learning Rate: 0.0060591152613648485
+   Gamma: 0.9914918468110137
+   Satisfaction Weight: 1.079616644473497
+   Cost Weight: 0.9510004371385287
+
+3. BALANCED_OPTIMIZER
+   Fitness: 813.47
+   Configuración: optimized_balanced_optimizer_5
+   Learning Rate: 0.007244061854995881
+   Gamma: 0.9951473198365488
+   Satisfaction Weight: 2.1350141034407213
+   Cost Weight: 0.7480770194984847
+
+4. COST_MINIMIZER
+   Fitness: 810.22
+   Configuración: optimized_cost_minimizer_2
+   Learning Rate: 0.006693402294154038
+   Gamma: 0.9898835548110285
+   Satisfaction Weight: 2.5041785770326084
+   Cost Weight: 0.9746803610178897
+
+5. EFFICIENCY_FOCUSED
+   Fitness: 777.92
+   Configuración: optimized_efficiency_focused_3
+   Learning Rate: 0.00746852741344339
+   Gamma: 0.9932880712969072
+   Satisfaction Weight: 2.407110108759443
+   Cost Weight: 0.6709495489488252
+
+
+ANÁLISIS DE ARQUETIPOS:
+--------------------
+
+BALANCED_OPTIMIZER:
+   Soluciones encontradas: 2
+   Fitness promedio: 832.67
+   Características distintivas: Alta prioridad en satisfacción, Fuerte enfoque en costos, Aprendizaje agresivo
+
+COST_MINIMIZER:
+   Soluciones encontradas: 2
+   Fitness promedio: 823.87
+   Características distintivas: Fuerte enfoque en costos, Aprendizaje agresivo
+
+EFFICIENCY_FOCUSED:
+   Soluciones encontradas: 1
+   Fitness promedio: 777.92
+   Características distintivas: Alta prioridad en satisfacción, Fuerte enfoque en costos, Aprendizaje agresivo

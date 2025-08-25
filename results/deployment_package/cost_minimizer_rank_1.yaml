@@ -1,0 +1,70 @@
+description: "Optimiza costos de energ\xEDa, acepta menor satisfacci\xF3n cuando es\
+  \ econ\xF3micamente justificable"
+dqn_hyperparameters:
+  batch_size: 32
+  dueling_network: true
+  epsilon_decay: !!python/object/apply:numpy._core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    6BovGxvG7z8=
+  epsilon_min: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    C4g6p2O8mz8=
+  epsilon_start: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    Um9xaCQ95z8=
+  gamma: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    7LkJHE267z8=
+  learning_rate: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    nn0+XnHReD8=
+  memory_size: 200000
+  target_update_freq: 10
+metadata:
+  archetype: cost_minimizer
+  fitness: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    w6rDDiwsikA=
+  generated_date: '2025-08-14T12:35:17.739457'
+  optimization_method: scatter_search
+  rank: 1
+recommended_usage:
+- "Estaciones p\xFAblicas con presi\xF3n econ\xF3mica"
+- "Operadores con m\xE1rgenes ajustados"
+- Sistemas con alta variabilidad de precios
+reward_weights:
+  energy_cost_weight: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    4bv/d5hu7j8=
+  energy_satisfaction_weight: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    4rFDGhxG8T8=
+  penalty_skipped_vehicle: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    nMvrErNhUEA=
+  reward_assigned_vehicle: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    Dhsq1RmBVUA=

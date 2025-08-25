@@ -1,0 +1,69 @@
+description: "Equilibra eficientemente costos y satisfacci\xF3n para uso general"
+dqn_hyperparameters:
+  batch_size: 128
+  dueling_network: true
+  epsilon_decay: !!python/object/apply:numpy._core.multiarray.scalar
+  - &id001 !!python/object/apply:numpy.dtype
+    args:
+    - f8
+    - false
+    - true
+    state: !!python/tuple
+    - 3
+    - <
+    - null
+    - null
+    - null
+    - -1
+    - -1
+    - 0
+  - !!binary |
+    1KfyXOjV7z8=
+  epsilon_min: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    pqAqnkR1pz8=
+  epsilon_start: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    8unZ6phG3T8=
+  gamma: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    Cs0sMT/Y7z8=
+  learning_rate: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    RlgeDPOrfT8=
+  memory_size: 10000
+  target_update_freq: 10
+metadata:
+  archetype: balanced_optimizer
+  fitness: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    FZqKCr1riUA=
+  generated_date: '2025-08-14T12:35:17.740252'
+  optimization_method: scatter_search
+  rank: 5
+recommended_usage:
+- Oficinas corporativas
+- "Centros comerciales est\xE1ndar"
+- Uso general en entornos mixtos
+reward_weights:
+  energy_cost_weight: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    HlO0Nz/w5z8=
+  energy_satisfaction_weight: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    mTY2RoIUAUA=
+  penalty_skipped_vehicle: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    gh76LFAJVkA=
+  reward_assigned_vehicle: !!python/object/apply:numpy._core.multiarray.scalar
+  - *id001
+  - !!binary |
+    5P9o3c9LO0A=
