@@ -687,7 +687,7 @@ class EVChargingEnv:
             print(f"DEBUG: Rejected - chargers overlap: {overlap}")
             return False
         
-        print(f"DEBUG: ✅ VALID combination with {len(action_combination)} actions")
+        print(f"DEBUG: VALID combination with {len(action_combination)} actions")
         return True
 
     def _generate_valid_action_combinations(self, individual_actions, current_time_idx):
@@ -696,79 +696,108 @@ class EVChargingEnv:
         if not evs:
             return [{"action": "advance_time"}]
         
-        # ✅ LÍMITE MÁS AGRESIVO para prevenir explosión combinatoria
-        max_combinations = min(100, 10 ** min(4, len(evs)))  # Reducido de 500 a 100
+        max_combinations = 100
         valid_combinations = []
         
-        action_lists = [individual_actions[ev] for ev in evs]
+        available_spots = set(range(self.n_spots)) - self.all_spots_occupied[current_time_idx]
+        available_chargers = set(self.charger_ids) - self.occupied_chargers[current_time_idx]
+        available_power = self.station_limit - self.power_used[current_time_idx]
         
-        #  TIMEOUT: Si hay demasiadas combinaciones posibles, usar solo muestreo
-        total_possible = 1
-        for action_list in action_lists:
-            total_possible *= len(action_list)
-            if total_possible > 10000:  # Si excede 10k combinaciones
-                print(f"  Too many combinations ({total_possible}), using sampling only")
-                break
-        
-        if len(evs) > 10 or total_possible > 10000:  #  Forzar muestreo si es complejo
-            # Muestreo inteligente
-            attempts = 0
-            max_attempts = max_combinations * 5  #  Límite de intentos
+        for attempt in range(max_combinations * 3):
+            combination = {}
             
-            while len(valid_combinations) < max_combinations // 2 and attempts < max_attempts:
-                attempts += 1
-                combination = {}
-                for ev_id in evs:
-                    combination[ev_id] = random.choice(individual_actions[ev_id])
+            temp_spots_used = set()
+            temp_chargers_used = set()
+            temp_power_used = 0
+            temp_from_spots_used = set()
+            
+            is_valid = True
+            
+            for ev_id in evs:
+                actions = individual_actions[ev_id]
+                viable_actions = []
                 
-                if self._is_valid_combination(combination, current_time_idx):
-                    valid_combinations.append(combination)
-            
-            if attempts >= max_attempts:
-                print(f"  Reached max attempts ({max_attempts}), returning {len(valid_combinations)} combinations")
-        else:
-            # Producto cartesiano con límite estricto
-
-            
-            checked = 0
-            max_checks = 5000  #  Máximo de combinaciones a revisar
-            
-            for combination in itertools.product(*action_lists):
-                checked += 1
-                if checked > max_checks:
-                    print(f"  Checked {max_checks} combinations, stopping")
+                for action in actions:
+                    action_type = action.get("action")
+                    
+                    if action_type == "admit_and_charge":
+                        spot = action.get("spot")
+                        charger = action.get("charger")
+                        power = action.get("power", 0)
+                        
+                        if (spot in available_spots and spot not in temp_spots_used and
+                            charger in available_chargers and charger not in temp_chargers_used and
+                            temp_power_used + power <= available_power):
+                            viable_actions.append(action)
+                    
+                    elif action_type == "admit_and_wait":
+                        spot = action.get("spot")
+                        if spot in available_spots and spot not in temp_spots_used:
+                            viable_actions.append(action)
+                    
+                    elif action_type == "move_to_charger":
+                        from_spot = action.get("from_spot")
+                        to_spot = action.get("to_spot")
+                        charger = action.get("charger")
+                        power = action.get("power", 0)
+                        
+                        if (from_spot not in temp_from_spots_used and
+                            to_spot in available_spots and to_spot not in temp_spots_used and
+                            charger in available_chargers and charger not in temp_chargers_used and
+                            temp_power_used + power <= available_power):
+                            viable_actions.append(action)
+                    
+                    elif action_type == "move_to_wait":
+                        from_spot = action.get("from_spot")
+                        to_spot = action.get("to_spot")
+                        
+                        if (from_spot not in temp_from_spots_used and
+                            to_spot in available_spots and to_spot not in temp_spots_used):
+                            viable_actions.append(action)
+                    
+                    else:
+                        viable_actions.append(action)
+                
+                if not viable_actions:
+                    is_valid = False
                     break
                 
-                action_dict = dict(zip(evs, combination))
+                chosen_action = random.choice(viable_actions)
+                combination[ev_id] = chosen_action
                 
-                # Pre-filtro de from_spot
-                from_spots_in_use = set()
-                has_conflict = False
+                action_type = chosen_action.get("action")
                 
-                for ev_id, action in action_dict.items():
-                    from_spot = action.get("from_spot")
-                    if from_spot is not None:
-                        if from_spot in from_spots_in_use:
-                            has_conflict = True
-                            break
-                        from_spots_in_use.add(from_spot)
+                if action_type == "admit_and_charge":
+                    temp_spots_used.add(chosen_action["spot"])
+                    temp_chargers_used.add(chosen_action["charger"])
+                    temp_power_used += chosen_action.get("power", 0)
                 
-                if has_conflict:
-                    continue
+                elif action_type == "admit_and_wait":
+                    temp_spots_used.add(chosen_action["spot"])
                 
-                if self._is_valid_combination(action_dict, current_time_idx):
-                    valid_combinations.append(action_dict)
-                    
-                    if len(valid_combinations) >= max_combinations:
-                        break
+                elif action_type == "move_to_charger":
+                    temp_from_spots_used.add(chosen_action["from_spot"])
+                    temp_spots_used.add(chosen_action["to_spot"])
+                    temp_chargers_used.add(chosen_action["charger"])
+                    temp_power_used += chosen_action.get("power", 0)
+                
+                elif action_type == "move_to_wait":
+                    temp_from_spots_used.add(chosen_action["from_spot"])
+                    temp_spots_used.add(chosen_action["to_spot"])
+            
+            if is_valid and combination not in valid_combinations:
+                valid_combinations.append(combination)
+                
+                if len(valid_combinations) >= max_combinations:
+                    break
         
         if not valid_combinations:
-            skip_combination = {ev_id: {"action": "skip", "ev_id": ev_id} 
-                            for ev_id in evs}
+            skip_combination = {ev_id: {"action": "skip", "ev_id": ev_id} for ev_id in evs}
             valid_combinations.append(skip_combination)
         
         valid_combinations.append({"action": "advance_time"})
         
+        print(f"    Generated {len(valid_combinations)} valid combinations")
         return valid_combinations
 
     def _get_possible_actions(self, state):
@@ -801,7 +830,6 @@ class EVChargingEnv:
         actions = []
         total_occupied = len(self.all_spots_occupied[current_time_idx])
         
-        # ✅ VALIDACIÓN CRÍTICA: Verificar consistencia de ubicación
         current_location = self.ev_location.get(ev_id, 'outside')
         
         if ev_status in ['waiting_inside', 'charging', 'charged_waiting']:
