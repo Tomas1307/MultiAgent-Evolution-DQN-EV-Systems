@@ -18,19 +18,17 @@ class EVChargingEnv:
     
     def __init__(self, config):
         """Inicializa el entorno con la configuración del sistema."""
-        # Constantes de recompensa y penalización
-        self.REWARD_ADMIT_AND_CHARGE = 50.0
-        self.REWARD_ADMIT_TO_WAIT = 20.0
+        self.REWARD_ADMIT_AND_CHARGE = 20.0
+        self.REWARD_ADMIT_TO_WAIT = 10.0
         self.REWARD_COMPLETE_CHARGE = 30.0
-        # En la función __init__
-        self.PENALTY_DEPART_UNSATISFIED = 100.0 # Penalización muy fuerte por fallo
+        self.PENALTY_DEPART_UNSATISFIED = 50.0
         self.PENALTY_REJECT_CAPACITY = 5.0
-        self.PENALTY_REJECT_STRATEGIC = 15.0
-        self.ENERGY_COST_WEIGHT = 0.5
-        self.EFFICIENCY_BONUS_WEIGHT = 10.0
-        self.FAIRNESS_BONUS_WEIGHT = 5.0
-        self.REWARD_FREE_UP_CHARGER = 25.0
-        self.PENALTY_BLOCKING_CHARGER = 15.0
+        self.PENALTY_REJECT_STRATEGIC = 25.0
+        self.ENERGY_COST_WEIGHT = 2.0
+        self.EFFICIENCY_BONUS_WEIGHT = 5.0
+        self.FAIRNESS_BONUS_WEIGHT = 3.0
+        self.REWARD_FREE_UP_CHARGER = 15.0
+        self.PENALTY_BLOCKING_CHARGER = 10.0
 
         # NUEVO (Top-K y acción explícita para avanzar tiempo)
         self.ADVANCE_TIME_ACTION_NAME = "advance_time"
