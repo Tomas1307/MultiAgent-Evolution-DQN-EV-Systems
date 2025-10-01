@@ -602,9 +602,7 @@ class EVChargingEnv:
         power_needed = 0
         chargers_needed = set()
         spots_used = set()
-        
-        # ✓ AÑADIR DEBUGGING
-        from_spots_used = set()  # Tracking de spots que se liberan
+        from_spots_used = set()
         
         for ev_id, action in action_combination.items():
             action_type = action.get("action")
@@ -613,7 +611,11 @@ class EVChargingEnv:
                 spot_id = action.get("spot")
                 charger_id = action.get("charger")
                 
-                if spot_id in spots_used or charger_id in chargers_needed:
+                if spot_id in spots_used:
+                    print(f"DEBUG: Rejected - spot {spot_id} already used (admit_and_charge)")
+                    return False
+                if charger_id in chargers_needed:
+                    print(f"DEBUG: Rejected - charger {charger_id} already needed")
                     return False
                     
                 spots_needed += 1
@@ -625,6 +627,7 @@ class EVChargingEnv:
                 spot_id = action.get("spot")
                 
                 if spot_id in spots_used:
+                    print(f"DEBUG: Rejected - spot {spot_id} already used (admit_and_wait)")
                     return False
                     
                 spots_needed += 1
@@ -635,14 +638,17 @@ class EVChargingEnv:
                 to_spot = action.get("to_spot")
                 from_spot = action.get("from_spot")
                 
-                # ✓ AÑADIR VALIDACIÓN CRÍTICA
                 if from_spot in from_spots_used:
-                    print(f" INVALID COMBINATION: Two EVs trying to move from same spot {from_spot}")
+                    print(f"DEBUG: Rejected - from_spot {from_spot} already used")
                     return False
                 
                 from_spots_used.add(from_spot)
                 
-                if charger_id in chargers_needed or to_spot in spots_used:
+                if charger_id in chargers_needed:
+                    print(f"DEBUG: Rejected - charger {charger_id} already needed (move)")
+                    return False
+                if to_spot in spots_used:
+                    print(f"DEBUG: Rejected - to_spot {to_spot} already used")
                     return False
                     
                 power_needed += action.get("power", 0)
@@ -653,14 +659,14 @@ class EVChargingEnv:
                 to_spot = action.get("to_spot")
                 from_spot = action.get("from_spot")
                 
-                # ✓ AÑADIR VALIDACIÓN CRÍTICA
                 if from_spot in from_spots_used:
-                    print(f" INVALID COMBINATION: Two EVs trying to move from same spot {from_spot}")
+                    print(f"DEBUG: Rejected - from_spot {from_spot} in move_to_wait")
                     return False
                 
                 from_spots_used.add(from_spot)
                 
                 if to_spot in spots_used:
+                    print(f"DEBUG: Rejected - to_spot {to_spot} in move_to_wait")
                     return False
                     
                 spots_used.add(to_spot)
@@ -668,15 +674,20 @@ class EVChargingEnv:
         total_occupied = len(self.all_spots_occupied[current_time_idx])
         
         if total_occupied + spots_needed > self.n_spots:
+            print(f"DEBUG: Rejected - capacity exceeded ({total_occupied} + {spots_needed} > {self.n_spots})")
             return False
         
         if self.power_used[current_time_idx] + power_needed > self.station_limit:
+            print(f"DEBUG: Rejected - power exceeded ({self.power_used[current_time_idx]} + {power_needed} > {self.station_limit})")
             return False
         
         current_chargers = self.occupied_chargers[current_time_idx]
         if len(chargers_needed & current_chargers) > 0:
+            overlap = chargers_needed & current_chargers
+            print(f"DEBUG: Rejected - chargers overlap: {overlap}")
             return False
         
+        print(f"DEBUG: ✅ VALID combination with {len(action_combination)} actions")
         return True
 
     def _generate_valid_action_combinations(self, individual_actions, current_time_idx):
