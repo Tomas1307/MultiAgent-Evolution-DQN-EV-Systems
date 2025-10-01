@@ -4,7 +4,6 @@ from collections import deque, defaultdict
 from typing import Dict, List, Tuple, Optional
 import itertools
 import random
-
 class EVChargingEnv:
     """
     Entorno mejorado de simulación para la carga de vehículos eléctricos con RL.
@@ -684,19 +683,16 @@ class EVChargingEnv:
         if not evs:
             return [{"action": "advance_time"}]
         
-        # CAMBIO: Aumentar límite de combinaciones pero mantener eficiencia
-        max_combinations = min(500, 10 ** min(6, len(evs)))  # Escalar con número de EVs
+        max_combinations = min(500, 10 ** min(6, len(evs)))
         valid_combinations = []
         
         action_lists = [individual_actions[ev] for ev in evs]
         
-        # Si hay muchos vehículos, usar muestreo inteligente en lugar de producto cartesiano completo
         if len(evs) > 10:
-            # Muestreo inteligente para evitar explosión combinatoria
+            # Muestreo inteligente para muchos vehículos
             for _ in range(max_combinations):
                 combination = {}
                 for ev_id in evs:
-                    # Seleccionar acción aleatoria para cada vehículo
                     combination[ev_id] = random.choice(individual_actions[ev_id])
                 
                 if self._is_valid_combination(combination, current_time_idx):
@@ -705,11 +701,27 @@ class EVChargingEnv:
                 if len(valid_combinations) >= max_combinations // 2:
                     break
         else:
-            # Para pocos vehículos, usar producto cartesiano como antes
-            import itertools
+            # Producto cartesiano para pocos vehículos
+            
+            
             for combination in itertools.product(*action_lists):
                 action_dict = dict(zip(evs, combination))
                 
+                from_spots_in_use = set()
+                has_conflict = False
+                
+                for ev_id, action in action_dict.items():
+                    from_spot = action.get("from_spot")
+                    if from_spot is not None:  # Es una acción de "move"
+                        if from_spot in from_spots_in_use:
+                            has_conflict = True
+                            break
+                        from_spots_in_use.add(from_spot)
+                
+                if has_conflict:
+                    continue  # Saltar esta combinación sin llamar a _is_valid_combination
+                
+                # Ahora sí validar completamente
                 if self._is_valid_combination(action_dict, current_time_idx):
                     valid_combinations.append(action_dict)
                     
