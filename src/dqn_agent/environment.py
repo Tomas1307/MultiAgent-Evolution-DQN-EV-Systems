@@ -789,6 +789,22 @@ class EVChargingEnv:
         actions = []
         total_occupied = len(self.all_spots_occupied[current_time_idx])
         
+        # ✅ VALIDACIÓN CRÍTICA: Verificar consistencia de ubicación
+        current_location = self.ev_location.get(ev_id, 'outside')
+        
+        if ev_status in ['waiting_inside', 'charging', 'charged_waiting']:
+            # El vehículo DEBE estar en un spot registrado
+            if current_location == 'outside':
+                print(f"⚠️  INCONSISTENCY: {ev_id} status={ev_status} but location='outside'")
+                # Corregir estado
+                self.ev_status[ev_id] = 'outside'
+                ev_status = 'outside'
+            elif current_location not in self.all_spots_occupied[current_time_idx]:
+                print(f"⚠️  INCONSISTENCY: {ev_id} at spot {current_location} not in occupied set")
+                # Agregar a occupied
+                self.all_spots_occupied[current_time_idx].add(current_location)
+        
+        # Continuar con la lógica original...
         if total_occupied >= self.n_spots and ev_status == 'outside':
             actions = [{"action": "reject", "reason": "parking_full", "ev_id": ev_id}]
             return actions
@@ -826,33 +842,42 @@ class EVChargingEnv:
             })
         
         elif ev_status == 'waiting_inside':
+            from_spot = current_location  # 
+            
             available_charger_spots = self._get_available_charger_spots(current_time_idx)
             
+            # Solo las 3 mejores opciones de cargador
+            charger_options = []
             for spot_id in available_charger_spots:
                 charger_id = self.spot_to_charger.get(spot_id)
                 if charger_id and charger_id in self.ev_charger_compatible.get(ev_id, []):
                     charger_power = self.max_charger_power_dict[charger_id]
-                    actions.append({
-                        "action": "move_to_charger",
-                        "ev_id": ev_id,
-                        "from_spot": self.ev_location[ev_id],
-                        "to_spot": spot_id,
-                        "charger": charger_id,
-                        "power": min(charger_power, self.max_charge_rate.get(ev_id, 50))
-                    })
+                    charger_options.append((spot_id, charger_id, charger_power))
             
-            actions.append({
-                "action": "continue_waiting",
-                "ev_id": ev_id
-            })
+            # Ordenar por potencia (mayor a menor) y tomar top 3
+            charger_options.sort(key=lambda x: x[2], reverse=True)
+            
+            for spot_id, charger_id, charger_power in charger_options[:3]:
+                actions.append({
+                    "action": "move_to_charger",
+                    "ev_id": ev_id,
+                    "from_spot": from_spot,  #  Ahora sí existe
+                    "to_spot": spot_id,
+                    "charger": charger_id,
+                    "power": min(charger_power, self.max_charge_rate.get(ev_id, 50))
+                })
+            
+            actions.append({"action": "continue_waiting", "ev_id": ev_id})
             
         elif ev_status == 'charged_waiting':
+            from_spot = current_location
+            
             available_waiting_spots = self._get_available_waiting_spots(current_time_idx)
             for to_spot in available_waiting_spots:
                 actions.append({
                     "action": "move_to_wait",
                     "ev_id": ev_id,
-                    "from_spot": self.ev_location[ev_id],
+                    "from_spot": from_spot,  #  Usar validado
                     "to_spot": to_spot
                 })
             
@@ -861,9 +886,7 @@ class EVChargingEnv:
         if len(actions) == 0:
             actions.append({"action": "skip", "ev_id": ev_id})
         
-        # CAMBIO: Aumentar límite pero mantener control
-        # return actions[:self.K_PER_TYPE]  ← ANTES: K_PER_TYPE = 8
-        max_actions = min(20, len(actions))  # ← NUEVO: Máximo 20 acciones por vehículo
+        max_actions = min(5, len(actions))
         return actions[:max_actions]
     
     def _get_available_charger_spots(self, time_idx):
