@@ -271,6 +271,7 @@ class EVChargingEnv:
         
         while self.current_time_idx < len(self.times) and skips_made < max_skips:
             current_time = self.times[self.current_time_idx]
+            self._synchronize_state(self.current_time_idx)
             
             evs_needing_decision = []
             for ev_id in self.ev_ids:
@@ -964,6 +965,29 @@ class EVChargingEnv:
         # Seleccionar el EV con mayor score
         ev_scores.sort(key=lambda x: x[1], reverse=True)
         return ev_scores[0][0]
+    
+    def _synchronize_state(self, time_idx):
+        """
+        Sincroniza all_spots_occupied con ev_location ANTES de generar acciones.
+        Esto previene inconsistencias durante la generación de acciones.
+        """
+        self.all_spots_occupied[time_idx] = set()
+        self.charger_spots_occupied[time_idx] = set()
+        
+        for ev_id, location in self.ev_location.items():
+            status = self.ev_status.get(ev_id)
+            
+            if (location != 'outside' and 
+                status not in ['outside', 'rejected', 'departed']):
+                
+                if not isinstance(location, int):
+                    print(f"⚠️  Invalid location type for {ev_id}: {location}")
+                    continue
+                
+                self.all_spots_occupied[time_idx].add(location)
+                
+                if location < self.n_charger_spots:
+                    self.charger_spots_occupied[time_idx].add(location)
     
     def step(self, action_idx):
         """
