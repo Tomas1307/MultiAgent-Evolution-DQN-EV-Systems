@@ -4,6 +4,7 @@ from collections import deque, defaultdict
 from typing import Dict, List, Tuple, Optional
 import itertools
 import random
+
 class EVChargingEnv:
     """
     Entorno mejorado de simulación para la carga de vehículos eléctricos con RL.
@@ -683,45 +684,66 @@ class EVChargingEnv:
         if not evs:
             return [{"action": "advance_time"}]
         
-        max_combinations = min(500, 10 ** min(6, len(evs)))
+        # ✅ LÍMITE MÁS AGRESIVO para prevenir explosión combinatoria
+        max_combinations = min(100, 10 ** min(4, len(evs)))  # Reducido de 500 a 100
         valid_combinations = []
         
         action_lists = [individual_actions[ev] for ev in evs]
         
-        if len(evs) > 10:
-            # Muestreo inteligente para muchos vehículos
-            for _ in range(max_combinations):
+        #  TIMEOUT: Si hay demasiadas combinaciones posibles, usar solo muestreo
+        total_possible = 1
+        for action_list in action_lists:
+            total_possible *= len(action_list)
+            if total_possible > 10000:  # Si excede 10k combinaciones
+                print(f"  Too many combinations ({total_possible}), using sampling only")
+                break
+        
+        if len(evs) > 10 or total_possible > 10000:  #  Forzar muestreo si es complejo
+            # Muestreo inteligente
+            attempts = 0
+            max_attempts = max_combinations * 5  #  Límite de intentos
+            
+            while len(valid_combinations) < max_combinations // 2 and attempts < max_attempts:
+                attempts += 1
                 combination = {}
                 for ev_id in evs:
                     combination[ev_id] = random.choice(individual_actions[ev_id])
                 
                 if self._is_valid_combination(combination, current_time_idx):
                     valid_combinations.append(combination)
-                    
-                if len(valid_combinations) >= max_combinations // 2:
-                    break
-        else:
-            # Producto cartesiano para pocos vehículos
             
+            if attempts >= max_attempts:
+                print(f"  Reached max attempts ({max_attempts}), returning {len(valid_combinations)} combinations")
+        else:
+            # Producto cartesiano con límite estricto
+
+            
+            checked = 0
+            max_checks = 5000  #  Máximo de combinaciones a revisar
             
             for combination in itertools.product(*action_lists):
+                checked += 1
+                if checked > max_checks:
+                    print(f"  Checked {max_checks} combinations, stopping")
+                    break
+                
                 action_dict = dict(zip(evs, combination))
                 
+                # Pre-filtro de from_spot
                 from_spots_in_use = set()
                 has_conflict = False
                 
                 for ev_id, action in action_dict.items():
                     from_spot = action.get("from_spot")
-                    if from_spot is not None:  # Es una acción de "move"
+                    if from_spot is not None:
                         if from_spot in from_spots_in_use:
                             has_conflict = True
                             break
                         from_spots_in_use.add(from_spot)
                 
                 if has_conflict:
-                    continue  # Saltar esta combinación sin llamar a _is_valid_combination
+                    continue
                 
-                # Ahora sí validar completamente
                 if self._is_valid_combination(action_dict, current_time_idx):
                     valid_combinations.append(action_dict)
                     
