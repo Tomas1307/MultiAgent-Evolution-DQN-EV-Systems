@@ -1,6 +1,9 @@
+
 import numpy as np
 from collections import deque, defaultdict
 from typing import Dict, List, Tuple, Optional
+import itertools
+import random
 
 class EVChargingEnv:
     """
@@ -21,13 +24,17 @@ class EVChargingEnv:
         self.REWARD_COMPLETE_CHARGE = 30.0
         # En la función __init__
         self.PENALTY_DEPART_UNSATISFIED = 100.0 # Penalización muy fuerte por fallo
-        self.PENALTY_REJECT_CAPACITY = -5.0
-        self.PENALTY_REJECT_STRATEGIC = -15.0
+        self.PENALTY_REJECT_CAPACITY = 5.0
+        self.PENALTY_REJECT_STRATEGIC = 15.0
         self.ENERGY_COST_WEIGHT = 0.5
         self.EFFICIENCY_BONUS_WEIGHT = 10.0
         self.FAIRNESS_BONUS_WEIGHT = 5.0
         self.REWARD_FREE_UP_CHARGER = 25.0
-        self.PENALTY_BLOCKING_CHARGER = -15.0
+        self.PENALTY_BLOCKING_CHARGER = 15.0
+
+        # NUEVO (Top-K y acción explícita para avanzar tiempo)
+        self.ADVANCE_TIME_ACTION_NAME = "advance_time"
+        self.K_PER_TYPE = 8
         
         # Configuración e inicialización del entorno
         self.config = config
@@ -37,8 +44,9 @@ class EVChargingEnv:
         # --- INICIO DEL CÁLCULO ROBUSTO DE STATE_SIZE ---
         
         # 1. Importar la clase del agente localmente para evitar dependencias circulares a nivel de módulo.
+        
         from .agent import EnhancedDQNAgentPyTorch as EnhancedDQNAgent
-
+        
         # 2. Crear un "estado ficticio" (dummy_state) que contenga todas las claves
         #    posibles que la función _process_state del agente espera encontrar.
         dummy_state = {
@@ -62,11 +70,9 @@ class EVChargingEnv:
         # 3. Crear un agente temporal con un state_size GRANDE y permisivo (ej. 256)
         #    para asegurar que la función _process_state no trunque el vector de salida.
         temp_agent_for_sizing = EnhancedDQNAgent(state_size=256, action_size=100)
-        print(f"##############################: {temp_agent_for_sizing}")
         # 4. Calcular el tamaño real y definitivo del vector de estado usando el agente
         #    temporal y el estado ficticio.
         self.state_size = len(temp_agent_for_sizing._process_state(dummy_state))
-        print(f"##############################: {self.state_size}")
         # 5. El tamaño de la acción puede ser un valor fijo y grande, ya que el agente
         #    solo elige de la lista de acciones posibles que genera el entorno.
         self.action_size = 100 
@@ -257,26 +263,19 @@ class EVChargingEnv:
         return self._get_state()
     
     def _get_state(self):
-        """
-        Obtiene el estado actual del entorno mejorado.
-        Incluye información sobre ocupación total del parqueadero y colas internas.
-        """
-        # Verificar inicialización
         if not hasattr(self, 'current_time_idx'):
             raise RuntimeError("Environment not properly initialized. Call reset() first.")
         
-        # Auto-skip de períodos sin vehículos (mantener lógica actual)
         max_skips = len(self.times)
         skips_made = 0
         
         while self.current_time_idx < len(self.times) and skips_made < max_skips:
             current_time = self.times[self.current_time_idx]
             
-            # Obtener vehículos que necesitan decisión (outside o waiting_inside)
             evs_needing_decision = []
             for ev_id in self.ev_ids:
                 if (self.arrival_time[ev_id] <= current_time < self.departure_time[ev_id] and
-                    self.ev_status[ev_id] in ['outside', 'waiting_inside'] and
+                    self.ev_status[ev_id] in ['outside', 'waiting_inside', 'charged_waiting'] and
                     ev_id not in self.evs_processed):
                     
                     energy_needed = self.required_energy[ev_id] - self.energy_delivered[ev_id]
@@ -292,55 +291,37 @@ class EVChargingEnv:
         if self.current_time_idx >= len(self.times):
             return None
         
-        # Seleccionar EV representativo (priorizar los que están afuera esperando)
-        evs_outside = [ev for ev in evs_needing_decision if self.ev_status[ev] == 'outside']
-        evs_waiting = [ev for ev in evs_needing_decision if self.ev_status[ev] == 'waiting_inside']
-        
-        representative_ev = self._select_representative_ev(evs_outside if evs_outside else evs_waiting)
-        if representative_ev is None:
-            self.current_time_idx += 1
-            return self._get_state()
-        
-        ev_id = representative_ev
         current_time = self.times[self.current_time_idx]
         
-        # Calcular features del EV (mantener lógica actual)
-        ev_features = self._calculate_ev_features(ev_id, current_time)
-        
-        # NUEVO: Calcular features del parqueadero completo
         parking_features = self._calculate_parking_features(current_time)
+        queue_features = self._calculate_queue_features_global(current_time)
         
-        # NUEVO: Calcular features de cola y fairness
-        queue_features = self._calculate_queue_features(ev_id, current_time)
+        # CAMBIO CRÍTICO: Eliminar límite artificial
+        # max_evs_per_state = 10  ← ELIMINAR ESTA LÍNEA
         
-        # Construir estado completo
+        ev_features_batch = []
+        # NUEVO: Procesar TODOS los vehículos que necesitan decisión
+        for ev_id in evs_needing_decision:  # ← SIN LÍMITE [:max_evs_per_state]
+            ev_features = self._calculate_ev_features(ev_id, current_time)
+            ev_features_batch.append(ev_features)
+        
         state = {
-            "ev_features": ev_features,
             "parking_features": parking_features,
             "queue_features": queue_features,
-            
-            # Features agregadas del sistema
+            "all_evs_needing_decision": evs_needing_decision,
+            "ev_features_batch": ev_features_batch,
             "total_occupancy_ratio": parking_features["total_occupancy_ratio"],
             "charger_availability_ratio": parking_features["charger_availability_ratio"],
             "waiting_spots_availability_ratio": parking_features["waiting_spots_availability_ratio"],
             "queue_length": queue_features["queue_length"],
-            "ev_position_in_queue": queue_features["position_in_queue"],
             "avg_wait_time_current": queue_features["avg_wait_time"],
-            
-            # Información del sistema
             "system_type": self.test_number,
             "n_spots_total": self.n_spots,
             "n_chargers_total": len(self.charger_ids),
             "transformer_limit": self.station_limit,
-            
-            # Información temporal
             "current_time_idx": self.current_time_idx,
             "current_time_normalized": self.current_time_idx / len(self.times),
-            
-            # EV representativo y su estado
-            "representative_ev": ev_id,
-            "ev_current_status": self.ev_status[ev_id],
-            "ev_current_location": self.ev_location[ev_id]
+            "num_evs_needing_decision": len(evs_needing_decision)
         }
         
         return state
@@ -379,6 +360,25 @@ class EVChargingEnv:
             ev_features.append(self.willingness_to_pay[ev_id] / 1.5)
         
         return ev_features
+    
+    def _calculate_queue_features_global(self, current_time):
+        queue_length = len(self.waiting_queue)
+        
+        waiting_times = []
+        for waiting_ev in self.waiting_queue:
+            if waiting_ev in self.ev_admission_time:
+                wait_time = current_time - self.ev_admission_time[waiting_ev]
+                waiting_times.append(wait_time)
+        
+        avg_wait_time = np.mean(waiting_times) / max(self.times) if waiting_times else 0
+        fairness_score = self._calculate_current_fairness()
+        
+        return {
+            "queue_length": queue_length / max(1, self.n_spots),
+            "avg_wait_time": avg_wait_time,
+            "fairness_score": fairness_score
+        }
+        
     
     def _calculate_parking_features(self, current_time):
         """NUEVO: Calcula características del estado del parqueadero completo."""
@@ -470,65 +470,313 @@ class EVChargingEnv:
         
         return fairness_score
     
-    def _get_possible_actions(self, state):
+    def _stable_sort_key(self, act: Dict):
         """
-        Determina las acciones posibles con el nuevo sistema de admisión.
-        Ahora considera admitir a spots de espera y gestión completa del parqueadero.
+        Clave de ordenamiento determinista por tipo de acción para estabilizar el set.
+        Evita que la red vea ordenes aleatorios en cada step.
         """
-        if state is None:
-            return []
+        t = act.get("action", "")
+        if t == "admit_and_charge":
+            return (act.get("spot", 10**9), act.get("charger", 10**9), -act.get("power", 0.0), act.get("ev_id", ""))
+        if t == "admit_and_wait":
+            return (act.get("spot", 10**9), act.get("estimated_wait", 10**9), act.get("ev_id", ""))
+        if t == "move_to_charger":
+            return (act.get("to_spot", 10**9), act.get("charger", 10**9), -act.get("power", 0.0), act.get("ev_id", ""))
+        if t == "move_to_wait":
+            return (act.get("to_spot", 10**9), act.get("ev_id", ""))
+        if t in ("reject", "strategic_reject"):
+            return (act.get("reason", ""), act.get("ev_id", ""))
+        if t == "continue_waiting":
+            return (act.get("ev_id", ""),)
+        # 'skip' y otros
+        return (0,)
+    
+    def _stabilize_and_topk_actions(self, actions: List[Dict]):
+        """
+        Ordena de forma determinista y aplica Top-K por tipo de acción.
+        Además, asegura que siempre exista una acción explícita para avanzar el tiempo.
+        """
+        if not actions:
+            actions = [{"action": "skip"}]
         
-        ev_id = state["representative_ev"]
-        ev_status = state["ev_current_status"]
-        current_time_idx = state["current_time_idx"]
-        current_time = self.times[current_time_idx]
+        # Asegurar que exista 'advance_time' explícita al final
+        has_advance = any(a.get("action") == self.ADVANCE_TIME_ACTION_NAME for a in actions)
+        if not has_advance:
+            actions.append({"action": self.ADVANCE_TIME_ACTION_NAME})
         
-        # Verificar que el EV está presente
-        if not (self.arrival_time[ev_id] <= current_time < self.departure_time[ev_id]):
-            return [{"action": "skip"}]
+        # Agrupar por tipo
+        groups = defaultdict(list)
+        for a in actions:
+            groups[a.get("action", "skip")].append(a)
         
-        # Verificar energía necesaria
-        energy_needed = self.required_energy[ev_id] - self.energy_delivered[ev_id]
-        if energy_needed <= 0.01:
-            return [{"action": "skip"}]
+        # Orden recomendado (prioriza acciones "más resolutivas" primero)
+        type_order = [
+            "admit_and_charge",
+            "move_to_charger",
+            "admit_and_wait",
+            "move_to_wait",
+            "continue_waiting",
+            "strategic_reject",
+            "reject",
+            "skip",
+            self.ADVANCE_TIME_ACTION_NAME
+        ]
         
-        actions = []
+        pruned = []
+        for t in type_order:
+            if t not in groups:
+                continue
+            bucket = groups[t]
+            # orden estable y determinista
+            bucket.sort(key=self._stable_sort_key)
+            # top-k por tipo (excepto advance_time y skip, que dejamos solo 1)
+            if t in ("skip", self.ADVANCE_TIME_ACTION_NAME):
+                pruned.extend(bucket[:1])
+            else:
+                pruned.extend(bucket[: self.K_PER_TYPE])
         
-        # Obtener ocupación actual
+        return pruned
+    
+    
+    def _apply_continuous_charging(self):
+        """Aplica la energía de este *slot* a todos los EVs que están cargando.
+
+        - Usa la potencia asignada en el momento de mover/admitir al cargador (si existe).
+        - Si no hay registro explícito de potencia, se calcula por compatibilidad (máx. del cargador y del EV).
+        - Actualiza energy_delivered y, si llega al 95% del requerimiento, pasa a 'charged_waiting'.
+        - Recalcula power_used del *slot actual* como la suma de potencias de los EVs cargando.
+        """
+        current_idx = self.current_time_idx
+        if current_idx >= len(self.times):
+            return
+
+        # Sumar potencias y aplicar energía
+        total_power = 0.0
+        charger_eff = 0.95
+
+        # Diccionarios que crearemos si no existen
+        if not hasattr(self, 'ev_current_power'):
+            self.ev_current_power = {}
+        if not hasattr(self, 'ev_assigned_charger'):
+            self.ev_assigned_charger = {}
+
+        for ev_id, status in list(self.ev_status.items()):
+            if status != 'charging':
+                continue
+
+            # Potencia base (priorizar la que guardamos en la acción)
+            power = self.ev_current_power.get(ev_id, None)
+            charger_id = self.ev_assigned_charger.get(ev_id, None)
+
+            # Si no hay potencia registrada, la inferimos
+            if power is None:
+                # Si sabemos el cargador asignado, usamos su potencia con límite del EV
+                if charger_id is not None:
+                    ch_power = self.max_charger_power_dict.get(charger_id, self.max_charger_power)
+                else:
+                    ch_power = self.max_charger_power
+                max_ev_rate = self.max_charge_rate.get(ev_id, 50) if hasattr(self, 'max_charge_rate') else 50
+                power = min(ch_power, max_ev_rate)
+                self.ev_current_power[ev_id] = power  # persistir
+
+            total_power += power
+
+            # Aplicar energía de este dt
+            eff = self.efficiency.get(ev_id, 0.9) if hasattr(self, 'efficiency') else 0.9
+            energy_to_deliver = power * self.dt * eff * charger_eff
+            remaining = self.required_energy[ev_id] - self.energy_delivered.get(ev_id, 0.0)
+            actual = min(energy_to_deliver, remaining)
+            self.energy_delivered[ev_id] = self.energy_delivered.get(ev_id, 0.0) + actual
+
+            # Verificar si ya quedó "casi completo"
+            if self.energy_delivered[ev_id] >= self.required_energy[ev_id] * 0.95:
+                self.ev_status[ev_id] = 'charged_waiting'
+                # NOTA: lo dejamos ocupando el cargador hasta que el agente lo mueva (move_to_wait)
+
+        # Respetar el límite del transformador de forma informativa (no abortamos, pero medimos uso)
+        self.power_used[current_idx] = min(total_power, self.station_limit)
+    
+    def _is_valid_combination(self, action_combination, current_time_idx):
+        spots_needed = 0
+        power_needed = 0
+        chargers_needed = set()
+        spots_used = set()
+        
+        # ✓ AÑADIR DEBUGGING
+        from_spots_used = set()  # Tracking de spots que se liberan
+        
+        for ev_id, action in action_combination.items():
+            action_type = action.get("action")
+            
+            if action_type == "admit_and_charge":
+                spot_id = action.get("spot")
+                charger_id = action.get("charger")
+                
+                if spot_id in spots_used or charger_id in chargers_needed:
+                    return False
+                    
+                spots_needed += 1
+                power_needed += action.get("power", 0)
+                chargers_needed.add(charger_id)
+                spots_used.add(spot_id)
+                
+            elif action_type == "admit_and_wait":
+                spot_id = action.get("spot")
+                
+                if spot_id in spots_used:
+                    return False
+                    
+                spots_needed += 1
+                spots_used.add(spot_id)
+                
+            elif action_type == "move_to_charger":
+                charger_id = action.get("charger")
+                to_spot = action.get("to_spot")
+                from_spot = action.get("from_spot")
+                
+                # ✓ AÑADIR VALIDACIÓN CRÍTICA
+                if from_spot in from_spots_used:
+                    print(f" INVALID COMBINATION: Two EVs trying to move from same spot {from_spot}")
+                    return False
+                
+                from_spots_used.add(from_spot)
+                
+                if charger_id in chargers_needed or to_spot in spots_used:
+                    return False
+                    
+                power_needed += action.get("power", 0)
+                chargers_needed.add(charger_id)
+                spots_used.add(to_spot)
+            
+            elif action_type == "move_to_wait":
+                to_spot = action.get("to_spot")
+                from_spot = action.get("from_spot")
+                
+                # ✓ AÑADIR VALIDACIÓN CRÍTICA
+                if from_spot in from_spots_used:
+                    print(f" INVALID COMBINATION: Two EVs trying to move from same spot {from_spot}")
+                    return False
+                
+                from_spots_used.add(from_spot)
+                
+                if to_spot in spots_used:
+                    return False
+                    
+                spots_used.add(to_spot)
+        
         total_occupied = len(self.all_spots_occupied[current_time_idx])
         
-        # Si el parqueadero está lleno, solo podemos rechazar
-        if total_occupied >= self.n_spots and ev_status == 'outside':
-            return [{
-                "action": "reject",
-                "reason": "parking_full",
-                "ev_id": ev_id
-            }]
+        if total_occupied + spots_needed > self.n_spots:
+            return False
         
-        # Si el EV está afuera, puede ser admitido o rechazado estratégicamente
+        if self.power_used[current_time_idx] + power_needed > self.station_limit:
+            return False
+        
+        current_chargers = self.occupied_chargers[current_time_idx]
+        if len(chargers_needed & current_chargers) > 0:
+            return False
+        
+        return True
+
+    def _generate_valid_action_combinations(self, individual_actions, current_time_idx):
+        evs = list(individual_actions.keys())
+        
+        if not evs:
+            return [{"action": "advance_time"}]
+        
+        # CAMBIO: Aumentar límite de combinaciones pero mantener eficiencia
+        max_combinations = min(500, 10 ** min(6, len(evs)))  # Escalar con número de EVs
+        valid_combinations = []
+        
+        action_lists = [individual_actions[ev] for ev in evs]
+        
+        # Si hay muchos vehículos, usar muestreo inteligente en lugar de producto cartesiano completo
+        if len(evs) > 10:
+            # Muestreo inteligente para evitar explosión combinatoria
+            for _ in range(max_combinations):
+                combination = {}
+                for ev_id in evs:
+                    # Seleccionar acción aleatoria para cada vehículo
+                    combination[ev_id] = random.choice(individual_actions[ev_id])
+                
+                if self._is_valid_combination(combination, current_time_idx):
+                    valid_combinations.append(combination)
+                    
+                if len(valid_combinations) >= max_combinations // 2:
+                    break
+        else:
+            # Para pocos vehículos, usar producto cartesiano como antes
+            import itertools
+            for combination in itertools.product(*action_lists):
+                action_dict = dict(zip(evs, combination))
+                
+                if self._is_valid_combination(action_dict, current_time_idx):
+                    valid_combinations.append(action_dict)
+                    
+                    if len(valid_combinations) >= max_combinations:
+                        break
+        
+        if not valid_combinations:
+            skip_combination = {ev_id: {"action": "skip", "ev_id": ev_id} 
+                            for ev_id in evs}
+            valid_combinations.append(skip_combination)
+        
+        valid_combinations.append({"action": "advance_time"})
+        
+        return valid_combinations
+
+    def _get_possible_actions(self, state):
+        evs_needing_decision = state["all_evs_needing_decision"]
+        current_time_idx = state["current_time_idx"]
+        
+        if not evs_needing_decision:
+            return [{"action": "advance_time"}]
+        
+        individual_actions = {}
+        for ev_id in evs_needing_decision:
+            individual_actions[ev_id] = self._get_actions_for_single_ev(ev_id, state)
+        
+        combined_actions = self._generate_valid_action_combinations(individual_actions, current_time_idx)
+        
+        return combined_actions
+    
+    def _get_actions_for_single_ev(self, ev_id, state):
+        current_time_idx = state["current_time_idx"]
+        current_time = self.times[current_time_idx]
+        ev_status = self.ev_status[ev_id]
+        
+        if not (self.arrival_time[ev_id] <= current_time < self.departure_time[ev_id]):
+            return [{"action": "skip", "ev_id": ev_id}]
+        
+        energy_needed = self.required_energy[ev_id] - self.energy_delivered[ev_id]
+        if energy_needed <= 0.01:
+            return [{"action": "skip", "ev_id": ev_id}]
+        
+        actions = []
+        total_occupied = len(self.all_spots_occupied[current_time_idx])
+        
+        if total_occupied >= self.n_spots and ev_status == 'outside':
+            actions = [{"action": "reject", "reason": "parking_full", "ev_id": ev_id}]
+            return actions
+        
         if ev_status == 'outside':
-            # Opción 1: Admitir y cargar (si hay cargador disponible)
             available_charger_spots = self._get_available_charger_spots(current_time_idx)
             
-            for spot_id in available_charger_spots[:2]:  # Limitar opciones
+            for spot_id in available_charger_spots:
                 charger_id = self.spot_to_charger.get(spot_id)
                 if charger_id and charger_id in self.ev_charger_compatible.get(ev_id, []):
-                    # Verificar capacidad del transformador
                     charger_power = self.max_charger_power_dict[charger_id]
-                    if self.power_used[current_time_idx] + charger_power <= self.station_limit:
-                        actions.append({
-                            "action": "admit_and_charge",
-                            "ev_id": ev_id,
-                            "spot": spot_id,
-                            "charger": charger_id,
-                            "power": min(charger_power, self.max_charge_rate.get(ev_id, 50))
-                        })
+                    actions.append({
+                        "action": "admit_and_charge",
+                        "ev_id": ev_id,
+                        "spot": spot_id,
+                        "charger": charger_id,
+                        "power": min(charger_power, self.max_charge_rate.get(ev_id, 50))
+                    })
             
-            # Opción 2: Admitir a spot de espera (si no hay cargadores)
-            if len(actions) == 0 and total_occupied < self.n_spots:
+            if total_occupied < self.n_spots:
                 available_waiting_spots = self._get_available_waiting_spots(current_time_idx)
-                
-                for spot_id in available_waiting_spots[:2]:  # Limitar opciones
+                for spot_id in available_waiting_spots:
                     estimated_wait = self._estimate_wait_time_for_charger(ev_id, current_time)
                     actions.append({
                         "action": "admit_and_wait",
@@ -537,60 +785,52 @@ class EVChargingEnv:
                         "estimated_wait": estimated_wait
                     })
             
-            # Opción 3: Rechazo estratégico (siempre disponible)
             actions.append({
                 "action": "strategic_reject",
                 "ev_id": ev_id,
                 "reason": "optimization"
             })
         
-        # Si el EV está esperando dentro, puede ser movido a cargador
         elif ev_status == 'waiting_inside':
             available_charger_spots = self._get_available_charger_spots(current_time_idx)
             
-            for spot_id in available_charger_spots[:1]:  # Solo la mejor opción
+            for spot_id in available_charger_spots:
                 charger_id = self.spot_to_charger.get(spot_id)
                 if charger_id and charger_id in self.ev_charger_compatible.get(ev_id, []):
                     charger_power = self.max_charger_power_dict[charger_id]
-                    if self.power_used[current_time_idx] + charger_power <= self.station_limit:
-                        actions.append({
-                            "action": "move_to_charger",
-                            "ev_id": ev_id,
-                            "from_spot": self.ev_location[ev_id],
-                            "to_spot": spot_id,
-                            "charger": charger_id,
-                            "power": min(charger_power, self.max_charge_rate.get(ev_id, 50))
-                        })
+                    actions.append({
+                        "action": "move_to_charger",
+                        "ev_id": ev_id,
+                        "from_spot": self.ev_location[ev_id],
+                        "to_spot": spot_id,
+                        "charger": charger_id,
+                        "power": min(charger_power, self.max_charge_rate.get(ev_id, 50))
+                    })
             
-            # Opción de seguir esperando
             actions.append({
                 "action": "continue_waiting",
                 "ev_id": ev_id
             })
             
         elif ev_status == 'charged_waiting':
-            # ¡El EV representativo es un bloqueador!
-            # La única acción útil es moverlo si hay espacio de espera.
-
             available_waiting_spots = self._get_available_waiting_spots(current_time_idx)
-            if available_waiting_spots:
-                # Proponer moverlo al primer spot de espera disponible para simplificar
-                to_spot = available_waiting_spots[0]
+            for to_spot in available_waiting_spots:
                 actions.append({
                     "action": "move_to_wait",
                     "ev_id": ev_id,
-                    "from_spot": self.ev_location[ev_id], # El cargador que ocupa
+                    "from_spot": self.ev_location[ev_id],
                     "to_spot": to_spot
                 })
-
-            # Si no hay a dónde moverse, la única opción es que siga esperando (skip)
-            actions.append({"action": "skip"})
+            
+            actions.append({"action": "skip", "ev_id": ev_id})
         
-        # Si no hay acciones, skip
         if len(actions) == 0:
-            actions.append({"action": "skip"})
+            actions.append({"action": "skip", "ev_id": ev_id})
         
-        return actions
+        # CAMBIO: Aumentar límite pero mantener control
+        # return actions[:self.K_PER_TYPE]  ← ANTES: K_PER_TYPE = 8
+        max_actions = min(20, len(actions))  # ← NUEVO: Máximo 20 acciones por vehículo
+        return actions[:max_actions]
     
     def _get_available_charger_spots(self, time_idx):
         """Obtiene spots con cargador disponibles."""
@@ -679,160 +919,58 @@ class EVChargingEnv:
         
         actions = self._get_possible_actions(state)
         
-        # Protección contra índices inválidos
         if action_idx < 0 or action_idx >= len(actions):
             action_idx = len(actions) - 1
         
-        action = actions[action_idx]
-        #print(f"DEBUG: Agente eligió la acción -> {action.get('action')}") # <-- AÑADE ESTA LÍNEA
-
-        ev_id = state["representative_ev"]
-        current_time_idx = state["current_time_idx"]
-        current_time = self.times[current_time_idx]
+        action_combination = actions[action_idx]
         
-        # Procesar según tipo de acción
-        if action["action"] == "skip":
-            reward = 0
-            if state["ev_current_status"] == 'charged_waiting':
-                # ¡El agente decidió no mover un bloqueador!
-                reward = -self.PENALTY_BLOCKING_CHARGER
-                queue_length = len(self.waiting_queue)
-                reward -= queue_length * 3
-
+        if "action" in action_combination and action_combination["action"] == "advance_time":
+            self._apply_continuous_charging()
             self.current_time_idx += 1
-            
-        elif action["action"] == "reject":
-            reward = self._execute_reject_action(action, ev_id, state)
-            
-        elif action["action"] == "strategic_reject":
-            reward = self._execute_strategic_reject_action(action, ev_id, state)
-            
-        elif action["action"] == "admit_and_charge":
-            reward = self._execute_admit_and_charge_action(action, ev_id, state)
-            
-        elif action["action"] == "admit_and_wait":
-            reward = self._execute_admit_and_wait_action(action, ev_id, state)
-            
-        elif action["action"] == "move_to_charger":
-            reward = self._execute_move_to_charger_action(action, ev_id, state)
-            
-        elif action["action"] == "continue_waiting":
-            reward = self._execute_continue_waiting_action(action, ev_id, state)
-            
-        elif action["action"] == "move_to_wait":
-            reward = self._execute_move_to_wait_action(action, ev_id, state)    
-            
+            return self._get_state(), 0, self.current_time_idx >= len(self.times)
         
-        else:
-            reward = 0
-            self.current_time_idx += 1
+        total_reward = 0
         
-        # Actualizar métricas y limpiar EVs que ya salieron
+        # Ejecutar todas las acciones SIN incrementar tiempo individualmente
+        for ev_id, action in action_combination.items():
+            reward = self._execute_single_action(action, ev_id, state)
+            total_reward += reward
+        
+        # Actualizar sistema UNA VEZ después de todas las acciones
         final_penalty = self._update_system_state()
-        total_step_reward = reward + final_penalty
+        total_step_reward = total_reward + final_penalty
+        
+        # Incrementar tiempo UNA VEZ al final
+        self.current_time_idx += 1
         
         return self._get_state(), total_step_reward, self.current_time_idx >= len(self.times)
-    
-    def _execute_reject_action(self, action, ev_id, state):
-        """Ejecuta rechazo por capacidad llena."""
-        self.ev_status[ev_id] = 'rejected'
-        self.rejection_reasons[action["reason"]] += 1
-        self.evs_processed.add(ev_id)
-        
-        # Penalización mínima - no había opción
-        reward = -self.PENALTY_REJECT_CAPACITY
-        
-        # Factor de prioridad (penalizar más rechazar EVs de alta prioridad)
-        if self.has_priority_info:
-            priority_factor = self.priority[ev_id] / self.max_priority
-            reward *= (1 + priority_factor * 0.5)
-        
-        self.current_time_idx += 1
-        return reward
-    
-    def _execute_move_to_wait_action(self, action, ev_id, state):
-        """Ejecuta el movimiento de un VE ya cargado a un spot de espera."""
-        from_spot = action["from_spot"]
-        to_spot = action["to_spot"]
 
-        # 1. Liberar el spot con cargador
-        self.all_spots_occupied[self.current_time_idx].remove(from_spot)
-        self.charger_spots_occupied[self.current_time_idx].remove(from_spot)
-        charger_id = self.spot_to_charger.get(from_spot)
-        if charger_id in self.occupied_chargers[self.current_time_idx]:
-            self.occupied_chargers[self.current_time_idx].remove(charger_id)
-
-        # 2. Ocupar el nuevo spot de espera
-        self.all_spots_occupied[self.current_time_idx].add(to_spot)
-
-        # 3. Actualizar la ubicación y estado del EV
-        self.ev_location[ev_id] = to_spot
-        self.ev_status[ev_id] = 'finished_waiting' # Un nuevo estado para no confundirlo con los que esperan carga
-
-        # 4. Asignar recompensa positiva por la buena gestión
-        reward = self.REWARD_FREE_UP_CHARGER
-
-        # Bonus: La recompensa es mayor si hay una cola larga de espera
-        queue_length = len(self.waiting_queue)
-        reward += queue_length * 5 # +5 de recompensa por cada coche en cola
-
-        self.current_time_idx += 1
-        return reward
-    
-    def _execute_strategic_reject_action(self, action, ev_id, state):
-        """Ejecuta rechazo estratégico."""
-        self.ev_status[ev_id] = 'rejected'
-        self.rejection_reasons['strategic'] += 1
-        self.evs_processed.add(ev_id)
-        
-        # Penalización moderada - fue una decisión
-        reward = -self.PENALTY_REJECT_STRATEGIC
-        
-        # Factores de ajuste
-        energy_deficit = self.required_energy[ev_id] - self.energy_delivered[ev_id]
-        urgency_factor = min(2.0, energy_deficit / self.avg_required_energy)
-        
-        if self.has_priority_info:
-            priority_factor = self.priority[ev_id] / self.max_priority
-            reward *= (1 + priority_factor * 0.5) * urgency_factor
-        
-        self.current_time_idx += 1
-        return reward
-    
-    # CÓDIGO CORREGIDO Y COMPLETO
     def _execute_admit_and_charge_action(self, action, ev_id, state):
-        """Ejecuta admisión directa a cargador con lógica de carga completa unificada."""
         spot = action["spot"]
         charger = action["charger"]
         power = action["power"]
         current_time = self.times[self.current_time_idx]
         
-        # Actualizar estado del EV y ocupación (se mantiene igual)
         self.ev_status[ev_id] = 'charging'
         self.ev_location[ev_id] = spot
-        self.ev_admission_time[ev_id] = current_time
         self.ev_charge_start_time[ev_id] = current_time
         
         self.all_spots_occupied[self.current_time_idx].add(spot)
         self.charger_spots_occupied[self.current_time_idx].add(spot)
         self.occupied_chargers[self.current_time_idx].add(charger)
-        self.power_used[self.current_time_idx] += power
         
-        self.charging_schedule.append((ev_id, self.current_time_idx, charger, spot, power))
+        self.ev_current_power = getattr(self, 'ev_current_power', {})
+        self.ev_assigned_charger = getattr(self, 'ev_assigned_charger', {})
+        self.ev_current_power[ev_id] = power
+        self.ev_assigned_charger[ev_id] = charger
         
-        # Calcular energía a entregar (se mantiene igual)
-        efficiency = self.efficiency.get(ev_id, 0.9)
-        charger_eff = 0.95
-        energy_to_deliver = power * self.dt * efficiency * charger_eff
-        remaining_needed = self.required_energy[ev_id] - self.energy_delivered.get(ev_id, 0)
-        actual_energy = min(energy_to_deliver, remaining_needed)
+        actual_energy = power * self.dt * self.efficiency.get(ev_id, 0.9) * 0.95
         self.energy_delivered[ev_id] += actual_energy
         
-        # --- INICIO DE LA LÓGICA DE RECOMPENSA (se mantiene igual) ---
         reward = self.REWARD_ADMIT_AND_CHARGE
         energy_requirement_bonus = self.required_energy[ev_id] * 0.5
         reward += energy_requirement_bonus
-
+        
         charger_max_power = self.max_charger_power_dict[charger]
         efficiency_ratio = power / charger_max_power
         if efficiency_ratio > 0.8:
@@ -846,22 +984,179 @@ class EVChargingEnv:
         if self.has_priority_info:
             priority_multiplier = 0.8 + 0.4 * (self.priority.get(ev_id, 1) / self.max_priority)
             reward *= priority_multiplier
-        # --- FIN DE LA LÓGICA DE RECOMPENSA ---
         
-        # --- INICIO DE LA LÓGICA DE CARGA COMPLETA (UNIFICADA) ---
-        # Consideramos "completo" al 95% para ser más flexibles.
         if self.energy_delivered[ev_id] >= self.required_energy[ev_id] * 0.95:
-            # 1. Otorgar la recompensa por completar la tarea.
             reward += self.REWARD_COMPLETE_CHARGE
-            
-            # 2. Actualizar el estado a 'charged_waiting' para que pueda ser movido.
             self.ev_status[ev_id] = 'charged_waiting'
-            
-            # 3. Marcarlo como procesado para que el agente no intente asignarlo de nuevo.
             self.evs_processed.add(ev_id)
-        # --- FIN DE LA LÓGICA UNIFICADA ---
         
-        self.current_time_idx += 1
+        return reward
+    
+    def _execute_move_to_charger_action(self, action, ev_id, state):
+        from_spot = action["from_spot"]
+        to_spot = action["to_spot"]
+        charger = action["charger"]
+        power = action["power"]
+        current_time = self.times[self.current_time_idx]
+        
+        if ev_id in self.waiting_queue:
+            self.waiting_queue.remove(ev_id)
+        
+        actual_location = self.ev_location.get(ev_id, 'outside')
+        
+        if actual_location != 'outside' and actual_location != from_spot:
+            # Si hay discrepancia, usar la ubicación real
+            from_spot = actual_location
+        
+        if isinstance(from_spot, int) and from_spot in self.all_spots_occupied[self.current_time_idx]:
+            self.all_spots_occupied[self.current_time_idx].remove(from_spot)
+        
+        self.all_spots_occupied[self.current_time_idx].add(to_spot)
+        self.charger_spots_occupied[self.current_time_idx].add(to_spot)
+        self.occupied_chargers[self.current_time_idx].add(charger)
+        
+        self.ev_status[ev_id] = 'charging'
+        self.ev_location[ev_id] = to_spot
+        self.ev_charge_start_time[ev_id] = current_time
+        
+        wait_time = current_time - self.ev_admission_time.get(ev_id, current_time)
+        
+        self.ev_current_power = getattr(self, 'ev_current_power', {})
+        self.ev_assigned_charger = getattr(self, 'ev_assigned_charger', {})
+        self.ev_current_power[ev_id] = power
+        self.ev_assigned_charger[ev_id] = charger
+        
+        actual_energy = power * self.dt * self.efficiency.get(ev_id, 0.9) * 0.95
+        self.energy_delivered[ev_id] += actual_energy
+        
+        if self.energy_delivered[ev_id] >= self.required_energy[ev_id] * 0.95:
+            self.ev_status[ev_id] = 'charged_waiting'
+            self.evs_processed.add(ev_id)
+        
+        reward = self.REWARD_ADMIT_AND_CHARGE * 0.8
+        
+        if wait_time < self.avg_stay_duration * 0.2:
+            reward += self.EFFICIENCY_BONUS_WEIGHT * 0.5
+        
+        current_price = self.prices[self.current_time_idx]
+        normalized_price = (current_price - self.min_price) / (self.max_price - self.min_price + 1e-6)
+        cost_penalty = -self.ENERGY_COST_WEIGHT * actual_energy * normalized_price
+        reward += cost_penalty
+        
+        if self.energy_delivered[ev_id] >= self.required_energy[ev_id] * 0.95:
+            reward += self.REWARD_COMPLETE_CHARGE
+        
+        return reward
+    
+    def _execute_move_to_wait_action(self, action, ev_id, state):
+        from_spot = action["from_spot"]
+        to_spot = action["to_spot"]
+        
+        if hasattr(self, 'ev_current_power') and ev_id in self.ev_current_power:
+            self.ev_current_power.pop(ev_id, None)
+        if hasattr(self, 'ev_assigned_charger') and ev_id in self.ev_assigned_charger:
+            self.ev_assigned_charger.pop(ev_id, None)
+        
+        actual_location = self.ev_location.get(ev_id, 'outside')
+        
+        if actual_location != 'outside' and actual_location != from_spot:
+            from_spot = actual_location
+        
+        if isinstance(from_spot, int):
+            if from_spot in self.charger_spots_occupied[self.current_time_idx]:
+                self.charger_spots_occupied[self.current_time_idx].remove(from_spot)
+            if from_spot in self.all_spots_occupied[self.current_time_idx]:
+                self.all_spots_occupied[self.current_time_idx].remove(from_spot)
+        
+        # Agregar al nuevo spot
+        self.all_spots_occupied[self.current_time_idx].add(to_spot)
+        
+        charger_id = self.spot_to_charger.get(from_spot)
+        if charger_id:
+            self.occupied_chargers[self.current_time_idx].discard(charger_id)
+        
+        self.ev_status[ev_id] = 'waiting_inside'
+        self.ev_location[ev_id] = to_spot
+        
+        if ev_id not in self.waiting_queue:
+            self.waiting_queue.append(ev_id)
+        
+        reward = self.REWARD_FREE_UP_CHARGER
+        queue_length = len(self.waiting_queue)
+        reward += queue_length * 5
+        
+        return reward
+
+    def _execute_single_action(self, action, ev_id, state):
+        action_type = action["action"]
+        current_time_idx = state["current_time_idx"]
+        
+        if action_type == "skip":
+            reward = 0
+            if state.get("ev_current_status") == 'charged_waiting':
+                reward = -self.PENALTY_BLOCKING_CHARGER
+                queue_length = len(self.waiting_queue)
+                reward -= queue_length * 3
+            self._apply_continuous_charging()
+            
+        elif action_type == "reject":
+            reward = self._execute_reject_action(action, ev_id, state)
+            
+        elif action_type == "strategic_reject":
+            reward = self._execute_strategic_reject_action(action, ev_id, state)
+            
+        elif action_type == "admit_and_charge":
+            reward = self._execute_admit_and_charge_action(action, ev_id, state)
+            
+        elif action_type == "admit_and_wait":
+            reward = self._execute_admit_and_wait_action(action, ev_id, state)
+            
+        elif action_type == "move_to_charger":
+            reward = self._execute_move_to_charger_action(action, ev_id, state)
+            
+        elif action_type == "continue_waiting":
+            reward = self._execute_continue_waiting_action(action, ev_id, state)
+            
+        elif action_type == "move_to_wait":
+            reward = self._execute_move_to_wait_action(action, ev_id, state)
+            
+        else:
+            reward = 0
+            self._apply_continuous_charging()
+        
+        return reward
+
+    def _execute_reject_action(self, action, ev_id, state):
+        """Ejecuta rechazo por capacidad llena."""
+        self.ev_status[ev_id] = 'rejected'
+        self.rejection_reasons[action["reason"]] += 1
+        self.evs_processed.add(ev_id)
+        
+        reward = -self.PENALTY_REJECT_CAPACITY
+        
+        if self.has_priority_info:
+            priority_factor = self.priority[ev_id] / self.max_priority
+            reward *= (1 + priority_factor * 0.5)
+        
+        # NO incrementar current_time_idx aquí
+        return reward
+    
+    def _execute_strategic_reject_action(self, action, ev_id, state):
+        """Ejecuta rechazo estratégico."""
+        self.ev_status[ev_id] = 'rejected'
+        self.rejection_reasons['strategic'] += 1
+        self.evs_processed.add(ev_id)
+        
+        reward = -self.PENALTY_REJECT_STRATEGIC
+        
+        energy_deficit = self.required_energy[ev_id] - self.energy_delivered[ev_id]
+        urgency_factor = min(2.0, energy_deficit / self.avg_required_energy)
+        
+        if self.has_priority_info:
+            priority_factor = self.priority[ev_id] / self.max_priority
+            reward *= (1 + priority_factor * 0.5) * urgency_factor
+        
+        # NO incrementar current_time_idx aquí
         return reward
     
     def _execute_admit_and_wait_action(self, action, ev_id, state):
@@ -870,103 +1165,27 @@ class EVChargingEnv:
         estimated_wait = action["estimated_wait"]
         current_time = self.times[self.current_time_idx]
         
-        # Actualizar estado del EV
         self.ev_status[ev_id] = 'waiting_inside'
         self.ev_location[ev_id] = spot
         self.ev_admission_time[ev_id] = current_time
         
-        # Agregar a cola de espera
         if ev_id not in self.waiting_queue:
             self.waiting_queue.append(ev_id)
         
-        # Registrar ocupación
         self.all_spots_occupied[self.current_time_idx].add(spot)
         
-        # Calcular recompensa base
         reward = self.REWARD_ADMIT_TO_WAIT
-        
-        # Penalización por tiempo de espera estimado
         wait_penalty = -estimated_wait * 2.0
         reward += wait_penalty
         
-        # Bonus por mantener fairness
         fairness_bonus = self._calculate_fairness_bonus()
         reward += fairness_bonus
         
-        # Factor de prioridad (menor impacto que en carga directa)
         if self.has_priority_info:
             priority_multiplier = 0.9 + 0.2 * (self.priority[ev_id] / self.max_priority)
             reward *= priority_multiplier
         
-        self.current_time_idx += 1
-        return reward
-    
-    def _execute_move_to_charger_action(self, action, ev_id, state):
-        """Ejecuta movimiento de spot de espera a cargador."""
-        from_spot = action["from_spot"]
-        to_spot = action["to_spot"]
-        charger = action["charger"]
-        power = action["power"]
-        current_time = self.times[self.current_time_idx]
-        
-        # Liberar spot anterior
-        if from_spot in self.all_spots_occupied[self.current_time_idx]:
-            self.all_spots_occupied[self.current_time_idx].remove(from_spot)
-        
-        # Actualizar estado del EV
-        self.ev_status[ev_id] = 'charging'
-        self.ev_location[ev_id] = to_spot
-        self.ev_charge_start_time[ev_id] = current_time
-        
-        # Remover de cola de espera
-        if ev_id in self.waiting_queue:
-            self.waiting_queue.remove(ev_id)
-        
-        # Registrar nueva ocupación
-        self.all_spots_occupied[self.current_time_idx].add(to_spot)
-        self.charger_spots_occupied[self.current_time_idx].add(to_spot)
-        self.occupied_chargers[self.current_time_idx].add(charger)
-        self.power_used[self.current_time_idx] += power
-        
-        # Registrar en schedule
-        self.charging_schedule.append((ev_id, self.current_time_idx, charger, to_spot, power))
-        
-        # Calcular tiempo de espera
-        wait_time = current_time - self.ev_admission_time[ev_id]
-        self.total_wait_times[ev_id] = wait_time
-        
-        # Calcular energía
-        efficiency = self.efficiency.get(ev_id, 0.9)
-        charger_eff = 0.95
-        energy_to_deliver = power * self.dt * efficiency * charger_eff
-        remaining_needed = self.required_energy[ev_id] - self.energy_delivered[ev_id]
-        actual_energy = min(energy_to_deliver, remaining_needed)
-        self.energy_delivered[ev_id] += actual_energy
-        
-        if self.energy_delivered[ev_id] >= self.required_energy[ev_id]:
-            self.ev_status[ev_id] = 'charged_waiting' # ¡Este VE es ahora un bloqueador potencial!
-            # También podríamos marcarlo como procesado para que no vuelva a ser seleccionado para cargar
-            self.evs_processed.add(ev_id)
-        
-        # Recompensa base por iniciar carga después de espera
-        reward = self.REWARD_ADMIT_AND_CHARGE * 0.8  # Ligeramente menor que carga directa
-        
-        # Bonus por tiempo de espera razonable
-        if wait_time < self.avg_stay_duration * 0.2:  # Esperó menos del 20% del tiempo promedio
-            reward += self.EFFICIENCY_BONUS_WEIGHT * 0.5
-        
-        # Ajuste por costo
-        current_price = self.prices[self.current_time_idx]
-        normalized_price = (current_price - self.min_price) / (self.max_price - self.min_price + 1e-6)
-        cost_penalty = -self.ENERGY_COST_WEIGHT * actual_energy * normalized_price
-        reward += cost_penalty
-        
-        # Verificar si se completó la carga
-        if self.energy_delivered[ev_id] >= self.required_energy[ev_id] * 0.95:
-            reward += self.REWARD_COMPLETE_CHARGE
-            self.evs_processed.add(ev_id)
-        
-        self.current_time_idx += 1
+        # NO incrementar current_time_idx aquí
         return reward
     
     # CÓDIGO CORREGIDO Y COMPLETO
@@ -991,10 +1210,10 @@ class EVChargingEnv:
         
         min_charge_rate = self.min_charge_rate.get(ev_id, 3.5)
         if min_charge_rate > 0 and time_remaining < energy_remaining / min_charge_rate:
-            # Se está quedando sin tiempo, la penalización aumenta
             reward -= 15.0
         
-        self.current_time_idx += 1
+        # NO llamar _apply_continuous_charging aquí (se hace en step())
+        # NO incrementar current_time_idx aquí
         return reward
     
     def _calculate_fairness_bonus(self):
@@ -1002,37 +1221,22 @@ class EVChargingEnv:
         fairness_score = self._calculate_current_fairness()
         return self.FAIRNESS_BONUS_WEIGHT * fairness_score
     
-    # CÓDIGO CORREGIDO Y COMPLETO
     def _update_system_state(self):
         """
         Actualiza el estado del sistema, libera recursos de EVs que parten
-        y calcula la penalización por aquellos que se van insatisfechos.
+        y SINCRONIZA el estado de ocupación con ev_location.
         """
         current_time = self.times[self.current_time_idx] if self.current_time_idx < len(self.times) else self.times[-1]
         final_penalty = 0.0
 
         # Liberar EVs que ya deberían haber salido
         for ev_id in list(self.ev_status.keys()):
-            # Comprobar si el EV debe partir en este timestep
             if self.departure_time[ev_id] <= current_time and self.ev_status[ev_id] not in ['outside', 'rejected', 'departed']:
                 
-                # --- INICIO DE LA MODIFICACIÓN ---
-                # Verificar si el vehículo se va insatisfecho ANTES de cambiar su estado
                 satisfaction_ratio = self.energy_delivered.get(ev_id, 0) / self.required_energy[ev_id]
-                if satisfaction_ratio < 0.9:  # Menos del 90% de la energía
-                    # La penalización es proporcional a la energía que faltó
+                if satisfaction_ratio < 0.9:
                     final_penalty += (-self.PENALTY_DEPART_UNSATISFIED) * (1 - satisfaction_ratio)
-                # --- FIN DE LA MODIFICACIÓN ---
 
-                # Liberar recursos (tu código actual)
-                if ev_id in self.ev_location and self.ev_location[ev_id] != 'outside':
-                    spot = self.ev_location[ev_id]
-                    for t in range(self.current_time_idx, len(self.times)):
-                        if spot in self.all_spots_occupied.get(t, set()):
-                            self.all_spots_occupied[t].remove(spot)
-                        if spot in self.charger_spots_occupied.get(t, set()):
-                            self.charger_spots_occupied[t].remove(spot)
-                
                 # Actualizar estado
                 self.ev_status[ev_id] = 'departed'
                 self.ev_location[ev_id] = 'outside'
@@ -1041,7 +1245,23 @@ class EVChargingEnv:
                 if ev_id in self.waiting_queue:
                     self.waiting_queue.remove(ev_id)
         
-        # La propagación de la ocupación se mantiene igual
+        self.all_spots_occupied[self.current_time_idx] = set()
+        self.charger_spots_occupied[self.current_time_idx] = set()
+        
+        for ev_id, location in self.ev_location.items():
+            status = self.ev_status.get(ev_id)
+            
+            if (location != 'outside' and 
+                status not in ['outside', 'rejected', 'departed']):
+                
+                spot = location
+                self.all_spots_occupied[self.current_time_idx].add(spot)
+                
+                # Si está en un spot con cargador (0 a n_charger_spots-1)
+                if isinstance(spot, int) and spot < self.n_charger_spots:
+                    self.charger_spots_occupied[self.current_time_idx].add(spot)
+        
+        # Propagación al siguiente timestep
         if self.current_time_idx < len(self.times) - 1:
             next_idx = self.current_time_idx + 1
             self.all_spots_occupied[next_idx] = self.all_spots_occupied[self.current_time_idx].copy()
@@ -1053,7 +1273,7 @@ class EVChargingEnv:
                 if t == self.current_time_idx and self.ev_status.get(ev_id) == 'charging':
                     self.power_used[next_idx] += power
                     
-        return final_penalty # Devolver la penalización acumulada en este paso
+        return final_penalty
     
     def get_performance_metrics(self):
         """Retorna métricas detalladas del desempeño del sistema."""
@@ -1077,6 +1297,7 @@ class EVChargingEnv:
         # Métricas de utilización
         avg_parking_util = np.mean([len(occupied) / self.n_spots 
                                    for occupied in self.all_spots_occupied.values()])
+                                   
         avg_charger_util = np.mean([len(occupied) / self.n_charger_spots 
                                    for occupied in self.charger_spots_occupied.values()])
         

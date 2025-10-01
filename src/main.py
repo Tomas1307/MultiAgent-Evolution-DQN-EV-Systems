@@ -100,7 +100,7 @@ def get_all_system_ids(data_dir: str) -> list[int]:
     return system_ids
 
 
-def generate_solution(config, agent=None, model_path="./ev_scheduler_model_pytorch.pt", state_size: int = 40, action_size: int = 60):
+def generate_solution(config, agent=None, model_path="./ev_scheduler_model_pytorch.pt", state_size: int = 256, action_size: int = 60):
     """
     Generates a solution using the RL agent.
 
@@ -108,7 +108,7 @@ def generate_solution(config, agent=None, model_path="./ev_scheduler_model_pytor
         config (dict): The configuration dictionary for the environment.
         agent (EnhancedDQNAgent, optional): An initialized RL agent. If None, an agent will be loaded.
         model_path (str, optional): The path to the pre-trained model. Defaults to "./ev_scheduler_model_pytorch.pt".
-        state_size (int, optional): The size of the state space. Defaults to 40.
+        state_size (int, optional): The size of the state space. Defaults to 256.
         action_size (int, optional): The size of the action space. Defaults to 60.
 
     Returns:
@@ -804,9 +804,9 @@ def main():
                             help="Path to a saved solution JSON file to visualize")
         parser.add_argument("--scatter_config", type=str, default=None,
                             help="Path to Scatter Search configuration YAML file")
-        parser.add_argument("--state_size", type=int, default=40,
+        parser.add_argument("--state_size", type=int, default=256,
                             help="State size for DQN Agent")
-        parser.add_argument("--action_size", type=int, default=40,
+        parser.add_argument("--action_size", type=int, default=500,
                             help="Action size for DQN Agent")
         
         parser.add_argument("--model_to_evaluate", type=str, default='./results/scatter_search/trained_models/efficiency_focused_rank_1.pt',
@@ -1297,6 +1297,8 @@ def main():
             print(f"Unrecognized mode: {args.mode}. Use 'train', 'train_dqn', 'solve', 'optimize', 'run_milp', 'visualize_solution', or 'scatter_search'.")
     except Exception as e:
         print(f"Error on main: {e}")
+        import traceback
+        traceback.print_exc()
         
 if __name__ == "__main__":
     main()

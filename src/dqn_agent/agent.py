@@ -216,6 +216,16 @@ class EnhancedDQNAgentPyTorch:
             # Si terminó el episodio, limpiar buffer
             if done:
                 self.n_step_buffer.clear()
+                
+    def _get_action_type(self, action):
+        if isinstance(action, dict):
+            if 'action' in action:
+                return action['action']
+            elif len(action) == 1 and 'action' in list(action.values())[0]:
+                return list(action.values())[0]['action']
+            else:
+                return 'combination'
+        return 'unknown'
     
     def act(self, state, possible_actions, verbose=False):
         """
@@ -226,13 +236,18 @@ class EnhancedDQNAgentPyTorch:
                 print("      No hay acciones posibles")
             return -1
         
-        # Epsilon-greedy con decay adaptativo
         if np.random.rand() <= self.epsilon:
-            # Exploración inteligente: preferir acciones menos exploradas
-            action_types = [self._get_action_type(action) for action in possible_actions]
-            action_counts = [self.action_counts[atype] + 1 for atype in action_types]
+            action_types = []
+            for action in possible_actions:
+                if isinstance(action, dict):
+                    if 'action' in action:
+                        action_types.append(action['action'])
+                    else:
+                        action_types.append('combination')
+                else:
+                    action_types.append('unknown')
             
-            # Probabilidades inversas a las veces que se ha usado cada tipo
+            action_counts = [self.action_counts[atype] + 1 for atype in action_types]
             probs = 1.0 / np.array(action_counts)
             probs = probs / probs.sum()
             
@@ -240,32 +255,25 @@ class EnhancedDQNAgentPyTorch:
             
             if verbose:
                 print(f"      Acción exploratoria: {action} (tipo: {action_types[action]}, "
-                      f"epsilon: {self.epsilon:.3f})")
+                    f"epsilon: {self.epsilon:.3f})")
             return action
         
         try:
-            # Preparar estado
             state_vector = self._process_state(state)
             state_tensor = torch.FloatTensor(state_vector).unsqueeze(0).to(self.device)
             
-            # Modo evaluación
             self.q_network.eval()
             with torch.no_grad():
                 q_values = self.q_network(state_tensor)
             
-            # Obtener Q-values para acciones posibles
             q_values_np = q_values.cpu().numpy().flatten()
             
-            # Filtrar solo acciones posibles y agregar bonus por diversidad
             action_values = []
             for i, action in enumerate(possible_actions[:len(q_values_np)]):
                 if i < len(q_values_np):
                     q_val = q_values_np[i]
-                    
-                    # Bonus por explorar tipos de acción menos usados
                     action_type = self._get_action_type(action)
                     exploration_bonus = 1.0 / (self.action_counts[action_type] + 10)
-                    
                     action_values.append((i, q_val + exploration_bonus * 0.1))
             
             if not action_values:
@@ -301,16 +309,7 @@ class EnhancedDQNAgentPyTorch:
         features = []
         
         try:
-            # 1. Features del EV (mantener compatibilidad)
-            ev_features = state.get("ev_features", [])
-            if isinstance(ev_features, list):
-                # Asegurar longitud consistente (padding si necesario)
-                ev_features_padded = ev_features[:15] + [0.0] * max(0, 15 - len(ev_features))
-                features.extend(ev_features_padded)
-            else:
-                features.extend([0.0] * 15)
-            
-            # 2. Features del parqueadero (NUEVO)
+            # 1. Características del parqueadero (fijas)
             parking_features = state.get("parking_features", {})
             if isinstance(parking_features, dict):
                 features.extend([
@@ -327,29 +326,96 @@ class EnhancedDQNAgentPyTorch:
             else:
                 features.extend([0.0] * 9)
             
-            # 3. Features de cola y fairness (NUEVO)
+            # 2. Características de cola (fijas)
             queue_features = state.get("queue_features", {})
             if isinstance(queue_features, dict):
                 features.extend([
                     queue_features.get("queue_length", 0.0),
-                    queue_features.get("position_in_queue", -1.0),
                     queue_features.get("avg_wait_time", 0.0),
                     queue_features.get("fairness_score", 1.0)
                 ])
             else:
-                features.extend([0.0, -1.0, 0.0, 1.0])
+                features.extend([0.0, 0.0, 1.0])
             
-            # 4. Features agregadas del sistema (compatibilidad mejorada)
+            # 3. CAMBIO CRÍTICO: Características de vehículos (dinámicas)
+            ev_features_batch = state.get("ev_features_batch", [])
+            num_evs_actual = len(ev_features_batch)
+            
+            # NUEVO: Estadísticas agregadas de todos los vehículos
+            if num_evs_actual > 0:
+                # Agregar información agregada de TODOS los vehículos
+                all_urgencies = []
+                all_energy_needs = []
+                all_wait_times = []
+                
+                for ev_features in ev_features_batch:
+                    if len(ev_features) >= 7:
+                        # Calcular urgencia aproximada: energía_requerida / tiempo_restante
+                        time_remaining = max(0.01, ev_features[5])  # time_remaining_from_now
+                        energy_delivered_ratio = ev_features[3]    # energy_delivered_ratio
+                        energy_remaining = 1.0 - energy_delivered_ratio
+                        urgency = energy_remaining / time_remaining
+                        all_urgencies.append(urgency)
+                        all_energy_needs.append(energy_remaining)
+                        
+                        if len(ev_features) >= 7:
+                            all_wait_times.append(ev_features[6])  # wait_time
+                
+                # Estadísticas agregadas
+                features.extend([
+                    num_evs_actual / 50.0,  # Número de vehículos normalizado
+                    np.mean(all_urgencies) if all_urgencies else 0.0,
+                    np.std(all_urgencies) if len(all_urgencies) > 1 else 0.0,
+                    np.max(all_urgencies) if all_urgencies else 0.0,
+                    np.mean(all_energy_needs) if all_energy_needs else 0.0,
+                    np.mean(all_wait_times) if all_wait_times else 0.0,
+                ])
+            else:
+                features.extend([0.0] * 6)
+            
+            # 4. NUEVO: Características de los vehículos más críticos (Top-K)
+            # En lugar de procesar TODOS individualmente, tomar los más importantes
+            max_individual_evs = min(8, num_evs_actual)  # Máximo 8 vehículos individuales
+            ev_features_per_vehicle = 12
+            
+            if num_evs_actual > 0:
+                # Ordenar por urgencia (aproximada) para tomar los más críticos
+                ev_with_urgency = []
+                for i, ev_features in enumerate(ev_features_batch):
+                    if len(ev_features) >= 6:
+                        time_remaining = max(0.01, ev_features[5])
+                        energy_delivered_ratio = ev_features[3]
+                        urgency = (1.0 - energy_delivered_ratio) / time_remaining
+                        ev_with_urgency.append((urgency, ev_features))
+                
+                # Tomar los más urgentes
+                ev_with_urgency.sort(key=lambda x: x[0], reverse=True)
+                top_evs = ev_with_urgency[:max_individual_evs]
+                
+                # Procesar vehículos individuales más importantes
+                for urgency, ev_features in top_evs:
+                    padded_features = ev_features[:ev_features_per_vehicle]
+                    while len(padded_features) < ev_features_per_vehicle:
+                        padded_features.append(0.0)
+                    features.extend(padded_features)
+                
+                # Pad si hay menos vehículos que el máximo
+                for i in range(len(top_evs), max_individual_evs):
+                    features.extend([0.0] * ev_features_per_vehicle)
+            else:
+                # No hay vehículos, llenar con ceros
+                for i in range(max_individual_evs):
+                    features.extend([0.0] * ev_features_per_vehicle)
+            
+            # 5. Características del sistema (fijas)
             features.extend([
                 state.get("total_occupancy_ratio", 0.0),
                 state.get("charger_availability_ratio", 0.5),
                 state.get("waiting_spots_availability_ratio", 0.5),
                 state.get("queue_length", 0.0),
-                state.get("ev_position_in_queue", -1.0),
                 state.get("avg_wait_time_current", 0.0)
             ])
             
-            # 5. Información del sistema
             features.extend([
                 state.get("system_type", 0) / 20.0,
                 state.get("n_spots_total", 100) / 200.0,
@@ -357,33 +423,29 @@ class EnhancedDQNAgentPyTorch:
                 state.get("transformer_limit", 50) / 200.0
             ])
             
-            # 6. Información temporal
             features.extend([
                 state.get("current_time_idx", 0) / 100.0,
                 state.get("current_time_normalized", 0.0)
             ])
             
-            # 7. Estado actual del EV (NUEVO - one-hot encoding)
-            ev_status = state.get("ev_current_status", "outside")
-            status_encoding = {
-                "outside": [1, 0, 0, 0],
-                "waiting_inside": [0, 1, 0, 0],
-                "charging": [0, 0, 1, 0],
-                "charged_waiting": [0, 0, 0, 1]
-            }
-            features.extend(status_encoding.get(ev_status, [0, 0, 0, 0]))
+            # 6. NUEVO: Información de carga de decisión
+            num_evs_needing_decision = state.get("num_evs_needing_decision", 0)
+            features.extend([
+                num_evs_needing_decision / 50.0,  # Número absoluto normalizado
+                1.0 if num_evs_needing_decision > 10 else 0.0,  # Indicador de alta carga
+                1.0 if num_evs_needing_decision > 20 else 0.0,  # Indicador de carga extrema
+                min(1.0, num_evs_needing_decision / 30.0)  # Factor de saturación
+            ])
             
-            # Convertir a numpy array
+            # Convertir a array y ajustar tamaño
             features_array = np.array(features, dtype=np.float32)
             
-            # Asegurar dimensión correcta
             if len(features_array) < self.state_size:
                 padding = np.zeros(self.state_size - len(features_array), dtype=np.float32)
                 features_array = np.concatenate([features_array, padding])
             elif len(features_array) > self.state_size:
                 features_array = features_array[:self.state_size]
             
-            # Limpiar NaN e infinitos
             features_array = np.nan_to_num(features_array, nan=0.0, posinf=1.0, neginf=0.0)
             
             return features_array
@@ -391,6 +453,8 @@ class EnhancedDQNAgentPyTorch:
         except Exception as e:
             print(f"Error en _process_state: {e}")
             return np.zeros(self.state_size, dtype=np.float32)
+        
+    
     
     def replay(self, beta=None):
         """

@@ -13,12 +13,8 @@ from src.common.config import load_system_config
 
 def create_episode_data(episode_num, total_reward, energy_metrics, assign_count, skip_count,
                        total_vehicles, episode_time, agent_epsilon):
-    """
-    Crea un diccionario estructurado con los datos del episodio para el logger.
-    Compatibilidad con el main anterior que funciona.
-    """
-    # CÓDIGO CORREGIDO
-    satisfaction_pct = energy_metrics.get("energy_satisfaction_pct", 0.0)
+    
+    satisfaction_pct = energy_metrics["energy_satisfaction_pct"]  
     assign_ratio = (assign_count / total_vehicles * 100) if total_vehicles > 0 else 0
 
     return {
@@ -173,7 +169,7 @@ def train_agent(systems, config):
             print(log_message)
             log_file.write(f"{log_message}\n")
             
-            system_info = f"Info del sistema: {len(system_config['arrivals'])} vehículos, {system_config['n_spots']} plazas, {len(system_config['chargers'])} cargadores"
+            system_info = f"Info del sistema: {len(system_config['arrivals'])} vehículos, {system_config['parking_config']['n_spots']} plazas, {len(system_config['parking_config']['chargers'])} cargadores"
             print(system_info)
             log_file.write(f"{system_info}\n")
             
@@ -211,7 +207,10 @@ def train_agent(systems, config):
                 
                 print(f"\nEpisodio {e+1}/{episodes_per_system} (Sistema {system_num})")
                 print(f"   Epsilon actual: {agent.epsilon:.4f}")
-                print(f"   Memoria: {len(agent.memory)}/{agent.memory.maxlen}")
+                if hasattr(agent.memory, 'maxlen'):
+                    print(f"   Memoria: {len(agent.memory)}/{agent.memory.maxlen}")
+                else:
+                    print(f"   Memoria: {len(agent.memory)}/{agent.memory.capacity}")
                 
                 state = env.reset()
                 total_reward = 0
@@ -276,8 +275,7 @@ def train_agent(systems, config):
                 # Métricas de satisfacción (usar el método correcto)
                 energy_metrics = env.get_performance_metrics()
 
-                satisfaction_pct = energy_metrics["total_satisfaction_pct"]
-                
+                satisfaction_pct = energy_metrics["energy_satisfaction_pct"]                
                 episode_time = time.time() - episode_start_time
                 episode_times.append(episode_time)
                 rewards_history.append(total_reward)
@@ -372,8 +370,8 @@ def train_agent(systems, config):
             # Guardar progreso del sistema
             system_info_for_logger = {
                 "total_vehicles": len(system_config["arrivals"]),
-                "n_spots": system_config["n_spots"],
-                "n_chargers": len(system_config["chargers"])  # Acceso directo, no parking_config
+                "n_spots": system_config["n_spots"],  # NO EXISTE
+                "n_chargers": len(system_config["chargers"])  # NO EXISTE
             }
             progress_logger.save_system_progress(system_num, episodes_data, system_info_for_logger)
             
