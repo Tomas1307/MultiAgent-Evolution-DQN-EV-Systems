@@ -1027,10 +1027,6 @@ class EVChargingEnv:
                     self.charger_spots_occupied[time_idx].add(location)
     
     def step(self, action_idx):
-        """
-        Ejecuta una acción y avanza el entorno al siguiente estado.
-        Maneja las nuevas acciones de admisión y gestión del parqueadero.
-        """
         state = self._get_state()
         if state is None:
             return None, 0, True
@@ -1049,16 +1045,15 @@ class EVChargingEnv:
         
         total_reward = 0
         
-        # Ejecutar todas las acciones SIN incrementar tiempo individualmente
         for ev_id, action in action_combination.items():
             reward = self._execute_single_action(action, ev_id, state)
             total_reward += reward
         
-        # Actualizar sistema UNA VEZ después de todas las acciones
+        self._apply_continuous_charging()
+        
         final_penalty = self._update_system_state()
         total_step_reward = total_reward + final_penalty
         
-        # Incrementar tiempo UNA VEZ al final
         self.current_time_idx += 1
         
         return self._get_state(), total_step_reward, self.current_time_idx >= len(self.times)
